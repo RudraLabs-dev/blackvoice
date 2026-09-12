@@ -104,3 +104,29 @@ def test_empty_input(router: Router) -> None:
 def test_normalise_strips_punctuation() -> None:
     assert normalise("Open  Firefox, please!") == "open firefox please"
     assert normalise("What's the time?") == "what's the time"
+
+
+# --------------------------------------------------------------------------- #
+# Devanagari
+# --------------------------------------------------------------------------- #
+# These were unreachable until normalise() stopped deleting combining marks:
+# every Devanagari vowel sign is Unicode category Mn, which \w does not match,
+# so "\u0916\u094b\u0932\u094b" arrived at the rules as two bare consonants and nothing matched.
+# The whisper.cpp backend emits Devanagari for Hindi speech, so this path is
+# now the normal one rather than a corner.
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("\u092b\u093e\u092f\u0930\u092b\u0949\u0915\u094d\u0938 \u0916\u094b\u0932\u094b", "open_app"),
+        ("\u0938\u094d\u0915\u094d\u0930\u0940\u0928\u0936\u0949\u091f \u0932\u094b", "screenshot"),
+        ("\u0935\u093e\u0908\u092b\u093e\u0908 \u092c\u0902\u0926 \u0915\u0930\u094b", "wifi_toggle"),
+        ("\u0938\u094b \u091c\u093e\u0913", "sleep"),
+    ],
+)
+def test_devanagari_commands_route(text: str, expected: str) -> None:
+    assert Router().route(text).name == expected
+
+
+def test_normalise_keeps_devanagari_intact() -> None:
+    for word in ("\u0916\u094b\u0932\u094b", "\u0906\u0935\u093e\u091c\u093c", "\u0938\u094d\u0915\u094d\u0930\u0940\u0928\u0936\u0949\u091f", "\u092c\u0902\u0926"):
+        assert normalise(word) == word
