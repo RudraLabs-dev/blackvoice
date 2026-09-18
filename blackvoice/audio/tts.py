@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import re
 import shutil
 import subprocess
 import threading
@@ -49,9 +50,57 @@ def detect_engine() -> str:
         return "none"
 
 
+#: Common romanised Hindi/Hinglish function words - a short, deliberately
+#: unglamorous list rather than a language-id model. This project already
+#: makes that same trade everywhere else (the romanised alternations threaded
+#: through nlu/intents.py, matched the same way) rather than pulling in a
+#: statistical detector to answer a question this cheap.
+_HINDI_ROMAN_WORDS = frozenset(
+    """
+    hai hain hoon ho tha thi raha rahi rahe
+    kar karo karna kiya kijiye kijiyega
+    nahi nahin haan
+    kya kaun kaise kahan kab kyun kyu kitna kitne kitni
+    mera meri mere tera teri tere hamara hamari hamare tumhara tumhari tumhare
+    aap tum main hum yeh ye woh wo inhe unhe
+    ka ki ke ko mein se par
+    band chalu khol kholo bolo bata batao suno sun le lo lena
+    accha acha theek thik bahut bilkul zaroor
+    """.split()
+)
+
+#: One matched word is enough to call a short command Hindi; a longer
+#: sentence needs a real share of it to actually be Hindi, so a single
+#: incidental "ka" or "ho" inside an English sentence does not flip the
+#: whole reply to the wrong voice.
+_HINDI_ROMAN_SHARE = 0.25
+
+
 def _looks_hindi(text: str) -> bool:
-    """True when the string contains Devanagari characters."""
-    return any("ऀ" <= ch <= "ॿ" for ch in text)
+    """True for Devanagari, or for romanised Hindi/Hinglish.
+
+    Devanagari is unambiguous; romanised Hindi is not - "hai", "kya" and
+    "kar" are also just English-looking tokens with nothing in the script to
+    tell them apart. That ambiguity cannot be shrugged off here, because the
+    text this function has to route is very often exactly that: AISkill's own
+    system prompt asks it to answer "in the same Hinglish mixture when that
+    is how the question came," so a reply like "aap kaise hain" or "yeh ek
+    test hai" carries no Devanagari at all. Missing that sent every such
+    reply to the English voice, which guesses English pronunciations for
+    Hindi words it was never trained on - the actual source of the "robotic"
+    sound reported from a real machine, and not something a correctly
+    working neural voice can fix by itself once it has been handed the wrong
+    language to begin with.
+    """
+    if any("ऀ" <= ch <= "ॿ" for ch in text):
+        return True
+    words = re.findall(r"[a-zA-Z']+", text.lower())
+    if not words:
+        return False
+    hits = sum(1 for w in words if w in _HINDI_ROMAN_WORDS)
+    if len(words) <= 4:
+        return hits >= 1
+    return hits / len(words) >= _HINDI_ROMAN_SHARE
 
 
 class Speaker:
