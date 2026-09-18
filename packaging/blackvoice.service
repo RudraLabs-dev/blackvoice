@@ -22,7 +22,19 @@ Environment=PYTHONUNBUFFERED=1
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=read-write
+# "read-write" is not a real ProtectHome= value - systemd's own choices are a
+# bare yes/no, "read-only" or "tmpfs" - so this was silently ignored on every
+# machine that ran it (confirmed live: `systemd[...]: .../blackvoice.service:
+# Failed to parse ProtectHome=read-write, ignoring`), leaving ProtectHome at
+# its default of "no". Written out as that same "no" explicitly rather than
+# tightened to "read-only": this app writes its config, models, voices and
+# log under $HOME (see config.py's CONFIG_DIR/DATA_DIR/CACHE_DIR), and
+# "read-only" blocks writes to the *running user's own* home too, not just
+# other users' - it would need an explicit ReadWritePaths= allowlist of every
+# one of those directories to avoid breaking exactly what this line is
+# supposed to leave alone, and that needs testing against a real install
+# before shipping it, not a guess alongside an unrelated bugfix release.
+ProtectHome=false
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
