@@ -80,7 +80,9 @@ except Exception:  # pragma: no cover - the window still works without them
 HELP: Dict[str, str] = {
     "ai.provider": "Where open questions are answered. Every voice command works without one.",
     "ai.ollama_url": "Address of a running Ollama. Local by default.",
-    "ai.ollama_model": "For a small machine try qwen2.5:1.5b, or qwen2.5:0.5b under 2 GB.",
+    "ai.ollama_model": "Pull it first: blackvoice setup --ollama --model <name>. "
+                       "The dropdown lists models known to run well on ordinary hardware; "
+                       "type any other tag if you know your machine can take it.",
     "ai.anthropic_model": "Needs ANTHROPIC_API_KEY in the environment.",
     "ai.openai_model": "Needs OPENAI_API_KEY in the environment.",
     "ai.api_key": "Leave empty. The environment variable is the safer place — this file is world-readable.",
@@ -273,6 +275,9 @@ class SettingsWindow(QDialog):
         return line
 
     def _editor_for(self, key: str, field, current: Any) -> Optional[_FieldEditor]:
+        if key == "ai.ollama_model":
+            return self._ollama_model_editor(key, current)
+
         # A dropdown wherever the value is one of a known set.
         if key in CHOICES:
             box = QComboBox()
@@ -320,6 +325,42 @@ class SettingsWindow(QDialog):
 
         log.debug("no editor for %s (%r)", key, type(current))
         return None
+
+    def _ollama_model_editor(self, key: str, current: Any) -> _FieldEditor:
+        """A dropdown of small models, editable for anyone who wants a bigger one.
+
+        A plain text field here invites typing a model sized for a workstation
+        onto a laptop that will then take thirty seconds to answer, or not
+        answer at all. This offers models known to run acceptably instead,
+        without refusing a name that is not on the list - editable, not
+        restricted, because whether a bigger model is worth the wait is the
+        user's call once they know what they are choosing.
+        """
+        from .. import ollama_models
+
+        box = QComboBox()
+        box.setEditable(True)
+        # A label -> real model name map, rather than Qt's item data: on an
+        # editable combo, typing a value that matches no item leaves
+        # currentIndex() (and so currentData()) pointing at whatever it was
+        # before, while currentText() correctly shows what was typed. Reading
+        # back through currentData() would silently return the wrong model.
+        names_by_label: Dict[str, str] = {}
+        for name in ollama_models.LIGHTWEIGHT_MODELS:
+            label = name + ("  (recommended)" if name == ollama_models.RECOMMENDED else "")
+            box.addItem(label)
+            names_by_label[label] = name
+
+        def _get() -> str:
+            text = box.currentText()
+            return names_by_label.get(text, text)
+
+        def _set(value: Any) -> None:
+            value = str(value)
+            label = next((l for l, n in names_by_label.items() if n == value), value)
+            box.setCurrentText(label)
+
+        return _FieldEditor(key, box, _get, _set)
 
     def _device_editor(self, key: str) -> _FieldEditor:
         """The microphone list, read from the system rather than typed in."""

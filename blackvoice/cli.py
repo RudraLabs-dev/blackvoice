@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 import time
@@ -170,6 +171,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     if args.whisper:
         return _setup_whisper(args)
+    if args.ollama:
+        return _setup_ollama(args)
 
     wanted = ["en", "hi"] if args.language == "both" else [args.language]
     failures = 0
@@ -248,6 +251,74 @@ def _setup_whisper(args: argparse.Namespace) -> int:
         print(f"  {CONFIG_FILE}")
 
     return 0 if binary else 1
+
+
+def _setup_ollama(args: argparse.Namespace) -> int:
+    """Pull a small Ollama model, and optionally make it the active one.
+
+    With no --model this only reports: what is installed, what is running,
+    and which curated models exist to choose from. Nothing is downloaded by
+    just asking what is available.
+    """
+    from . import ollama_models
+
+    config = Config.load()
+    reachable = ollama_models.is_reachable(config.ai.ollama_url)
+    pulled = ollama_models.pulled_models(config.ai.ollama_url) if reachable else None
+
+    if not args.model:
+        print(f"{OK if reachable else BAD} Ollama at {config.ai.ollama_url}"
+              f"{'' if reachable else ' - ' + ollama_models.not_running_message()}")
+        print(f"\nCurrently configured: {config.ai.ollama_model}")
+        if pulled is not None:
+            have = OK if config.ai.ollama_model in pulled else DOT
+            print(f"  {have} {'already pulled' if config.ai.ollama_model in pulled else 'not pulled yet'}")
+
+        print("\nLightweight models you can pull:")
+        for name in ollama_models.LIGHTWEIGHT_MODELS:
+            mark = OK if pulled and name in pulled else DOT
+            star = " (recommended)" if name == ollama_models.RECOMMENDED else ""
+            print(f"  {mark} {name:<16} {ollama_models.describe(name)}{star}")
+        print("\nPull one with: blackvoice setup --ollama --model <name>")
+        print("Add --set-default to also make it the active model.")
+        return 0
+
+    name = args.model
+    print(f"{ARROW} pulling {name}" + ("" if name in ollama_models.LIGHTWEIGHT_MODELS else " (not in the curated list)"))
+
+    last = [-1]
+
+    def _progress(status: str, done: int, total: int) -> None:
+        percent = int(done * 100 / total) if total else None
+        if percent is not None:
+            if percent == last[0]:
+                return
+            last[0] = percent
+            print(chr(13) + f"  {percent:3d}%  {status}" + " " * 10, end="", flush=True)
+        else:
+            print(f"  {status}")
+
+    try:
+        ollama_models.pull(name, config.ai.ollama_url, on_progress=_progress)
+    except ollama_models.OllamaError as exc:
+        print()
+        print(f"{BAD} {exc}")
+        return 1
+
+    print()
+    print(f"{OK} {name} installed")
+
+    if args.set_default:
+        config.ai.ollama_model = name
+        config.ai.provider = "ollama"
+        config.save()
+        print(f"{OK} set as the active model ({CONFIG_FILE})")
+    elif name != config.ai.ollama_model:
+        print(f"\n{BULLET} to use it, set ai.ollama_model to {name!r} in")
+        print(f"  {CONFIG_FILE}")
+        print("  or re-run this with --set-default")
+
+    return 0
 
 
 def cmd_mic(args: argparse.Namespace) -> int:
@@ -490,6 +561,38 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     ]:
         mark = OK if shutil.which(tool) else DOT
         print(f"  {mark} {tool:<20} {why}")
+
+    print("\nAI backend")
+    from . import ollama_models
+
+    provider = config.ai.provider
+    if provider == "none":
+        print(f"  {DOT} switched off - unrecognised phrases just say so")
+    elif provider == "ollama":
+        reachable = ollama_models.is_reachable(config.ai.ollama_url)
+        print(f"  {OK if reachable else BAD} Ollama server at {config.ai.ollama_url}")
+        if not reachable:
+            print(f"      {ollama_models.not_running_message()}")
+            problems.append("ollama serve")
+        else:
+            pulled = ollama_models.pulled_models(config.ai.ollama_url) or []
+            have = config.ai.ollama_model in pulled
+            print(f"  {OK if have else BAD} model {config.ai.ollama_model!r} "
+                  f"{'is pulled' if have else 'is not pulled yet'}")
+            if not have:
+                problems.append(f"blackvoice setup --ollama --model {config.ai.ollama_model}")
+            if config.ai.ollama_model not in ollama_models.LIGHTWEIGHT_MODELS:
+                print(f"      {DOT} not in the curated lightweight list - "
+                      "make sure this machine can actually run it")
+    elif provider in ("anthropic", "openai"):
+        env_var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+        has_key = bool(config.ai.api_key or os.environ.get(env_var))
+        print(f"  {OK if has_key else BAD} {provider}: {env_var} "
+              f"{'is set' if has_key else 'is not set'}")
+        if not has_key:
+            problems.append(f"export {env_var}=...")
+    else:
+        print(f"  {BAD} unknown provider {provider!r}")
 
     print("\nSpeech engine")
     from .audio.stt import find_whisper_binary
@@ -830,7 +933,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="download a whisper.cpp model instead of the Vosk ones",
     )
     setup.add_argument(
-        "--model", help="which whisper model, e.g. ggml-small-q5_1.bin",
+        "--model",
+        help="which whisper model (e.g. ggml-small-q5_1.bin) or Ollama model "
+             "(e.g. qwen2.5:1.5b) to fetch",
+    )
+    setup.add_argument(
+        "--ollama", action="store_true",
+        help="pull a small Ollama model instead of speech models",
+    )
+    setup.add_argument(
+        "--set-default", action="store_true",
+        help="with --ollama, also make the pulled model the active one",
     )
     setup.set_defaults(func=cmd_setup)
 
