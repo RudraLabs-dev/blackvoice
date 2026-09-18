@@ -17,6 +17,22 @@
 #   sounddevice        py3-none-any         not packaged in Ubuntu
 #   SpeechRecognition  py3-none-any         not packaged in Ubuntu
 #   pyttsx3            py3-none-any         not packaged in Ubuntu
+#   srt                py3-none-any (sdist) vosk/__init__.py imports it directly
+#   tqdm               py3-none-any         vosk/__init__.py imports it directly
+#
+# srt and tqdm are not optional extras of vosk - vosk/__init__.py does
+# `import srt` and `from tqdm import tqdm` at module level, unconditionally,
+# so without them `import vosk` fails outright with ModuleNotFoundError and
+# every install silently has no offline speech recognition at all. --no-deps
+# is still right for vosk's other declared dependencies (cffi and requests
+# are already distro packages; websockets is a real transitive dependency too,
+# but only reached by a lazy import inside a websocket-server helper this
+# project never calls, so pulling it in - and whatever ABI-tagged wheels it
+# would drag with it - would be paying for a feature nothing here uses). This
+# was found on a real machine: `blackvoice doctor` reported vosk as not
+# installed despite it sitting right there in /opt/blackvoice/lib, because
+# every release since the very first one collected it with --no-deps and
+# never separately listed the two imports it cannot do without.
 #
 # The earlier design bundled a whole virtualenv. That was wrong: a venv symlinks
 # the system interpreter and pins itself to its version, so a package built on
@@ -39,7 +55,7 @@ LIB="$STAGE$PREFIX/lib"
 OUT="$ROOT/dist"
 
 #: Libraries with no distribution package. All ABI-independent.
-BUNDLED=(vosk sounddevice SpeechRecognition pyttsx3)
+BUNDLED=(vosk sounddevice SpeechRecognition pyttsx3 srt tqdm)
 
 # ------------------------------------------------------------------ version
 # A quoted heredoc keeps the shell out of the Python entirely, which matters
@@ -104,6 +120,27 @@ find "$LIB" -maxdepth 1 -mindepth 1 -type d -printf '    %f\n' | sort | head -20
 for required in blackvoice vosk; do
     [ -d "$LIB/$required" ] || { echo "$required is missing from $LIB" >&2; exit 1; }
 done
+
+# A directory existing is not the same as the package inside it actually
+# importing - vosk's own directory was present in every past build, and
+# `import vosk` still failed on a real installed machine with
+# ModuleNotFoundError: No module named 'srt', because --no-deps means pip
+# collects exactly what is asked for and nothing a bundled package happens to
+# `import` on its own. Checked here with the exact PYTHONPATH the real
+# launcher uses, so a gap like that one is a build failure, not something
+# discovered on someone's machine after the package has already shipped.
+# vosk only, not the other three bundled libraries: sounddevice in particular
+# talks to PortAudio at import time, which this build environment - a plain
+# container, no audio server running - has no business being able to reach,
+# and a check that fails for that reason would not be telling us anything
+# true about the package.
+if ! PYTHONPATH="$LIB" python3 -c "import vosk" 2>/tmp/vosk-import-error; then
+    echo "vosk is bundled but does not actually import:" >&2
+    cat /tmp/vosk-import-error >&2
+    rm -f /tmp/vosk-import-error
+    exit 1
+fi
+rm -f /tmp/vosk-import-error
 
 # ------------------------------------------------------------------- files
 install -m 0755 "$ROOT/packaging/blackvoice-launcher.sh" "$STAGE/usr/bin/blackvoice"

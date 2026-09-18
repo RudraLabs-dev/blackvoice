@@ -13,13 +13,13 @@ Download from the
 **Debian, Ubuntu, Mint, Pop!\_OS**
 
 ```bash
-sudo apt install ./blackvoice_0.5.2-1_amd64.deb
+sudo apt install ./blackvoice_0.5.3-1_amd64.deb
 ```
 
 **Fedora, RHEL, openSUSE**
 
 ```bash
-sudo dnf install ./blackvoice-0.5.2-1.x86_64.rpm
+sudo dnf install ./blackvoice-0.5.3-1.x86_64.rpm
 ```
 
 ### What the package installs
