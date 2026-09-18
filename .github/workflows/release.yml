@@ -149,10 +149,20 @@ jobs:
       - name: Build prerequisites
         run: |
           apt-get update -qq
+          # python3-requests/numpy/cffi: not bundled into the package - they
+          # are declared Depends: instead, on the assumption that any real
+          # Debian install already has them. Installing them here too is what
+          # makes that assumption true on the *build* container as well,
+          # which build-package.sh's own verification step now relies on: it
+          # actually imports vosk rather than just checking its directory
+          # exists, and vosk imports requests - without this, that check was
+          # failing for the wrong reason entirely, on a machine no end user's
+          # install would ever resemble.
           apt-get install -y -qq --no-install-recommends \
             git python3 python3-venv python3-pip \
             ruby ruby-dev build-essential rpm \
-            portaudio19-dev libasound2-dev > /dev/null
+            portaudio19-dev libasound2-dev \
+            python3-requests python3-numpy python3-cffi > /dev/null
           gem install --no-document fpm > /dev/null
 
       - uses: actions/checkout@v4
@@ -185,10 +195,16 @@ jobs:
     steps:
       - name: Build prerequisites
         run: |
+          # python3-requests/numpy/cffi: see the identical comment in the deb
+          # job above - build-package.sh's verification step actually imports
+          # vosk now, which needs requests, and this package's own --depends
+          # further down already names these exact three for Fedora, so this
+          # is the same assumption the .rpm itself already makes.
           dnf install -y -q \
             git python3 python3-pip \
             ruby ruby-devel gcc make redhat-rpm-config rpm-build \
-            portaudio-devel alsa-lib-devel > /dev/null
+            portaudio-devel alsa-lib-devel \
+            python3-requests python3-numpy python3-cffi > /dev/null
           gem install --no-document fpm > /dev/null
 
       - uses: actions/checkout@v4
