@@ -47,14 +47,20 @@ unless the offline pass is unsure *and* you have allowed a cloud fallback.
 ## Why offline first
 
 Most voice assistants send your microphone to someone else's server. Black Voice
-does the opposite: [Vosk](https://alphacephei.com/vosk/) runs locally on every
-utterance, and the network is something you opt into rather than depend on.
+does the opposite: recognition runs locally on every utterance, and the network
+is something you opt into rather than depend on.
 
-With `language: "both"`, the English and Hindi models both transcribe the same
-audio and the more confident transcript wins. That is what makes Hinglish work —
-most people do not speak one language at a time, and the software should keep up.
+Most people do not speak one language at a time, and the software should keep
+up. With [whisper.cpp](https://github.com/ggml-org/whisper.cpp) installed
+(`blackvoice setup --whisper`), one model transcribes the whole sentence in
+whichever script it was actually said in — that is what makes a sentence that
+switches from Hindi to English mid-way work. Without it, [Vosk](https://alphacephei.com/vosk/)
+falls back to two models racing on the same audio, English and Hindi, and the
+more confident transcript wins — a weaker trick, since neither model can
+produce a sentence that needs words from both, but it needs nothing installed
+beyond what ships already.
 
-Set `speech.mode` to `"offline"` and nothing ever leaves the machine.
+Set `speech.mode` to `"offline"` and nothing ever leaves the machine, either way.
 
 ## Requirements
 
@@ -68,11 +74,13 @@ Set `speech.mode` to `"offline"` and nothing ever leaves the machine.
 
 ## Project status
 
-Version 0.1.0. The command routing, safety guard, configuration and skill layers
-are covered by 165 tests. The audio path — microphone capture, Vosk recognition,
+Version 0.3.0. The command routing, safety guard, configuration and skill layers
+are covered by 285 tests. The audio path — microphone capture, recognition,
 wake word and speech output — needs a real Linux machine with a microphone to
 exercise, so treat it as the least-tested part of the system and report what
-breaks.
+breaks. `blackvoice eval` exists for exactly that: recording your own voice
+against a set of prompts and scoring what each recognition backend actually
+gets right, rather than trusting a claim about accuracy in the abstract.
 
 ---
 

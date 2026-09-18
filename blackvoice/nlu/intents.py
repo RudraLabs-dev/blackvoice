@@ -276,10 +276,26 @@ for _rule in RULES:
     _rule.compile()
 
 
+#: Punctuation the rules themselves look at: arithmetic, times and contractions.
+#: Everything else becomes a space.
+_KEEP = set("_'.+-*/%()×÷:=")
+
+
 def normalise(text: str) -> str:
-    """Lower-case, strip punctuation noise and collapse whitespace."""
+    r"""Lower-case, strip punctuation noise and collapse whitespace.
+
+    Combining marks are kept, which a ``\w``-based character class would not do:
+    they are Unicode category Mn, so every Devanagari vowel sign would be
+    deleted and "खोलो" would reach the rules as "ख ल" - two bare consonants
+    matching nothing. That silently made every Devanagari pattern in this file
+    unreachable, so keep the filter working on categories rather than on ``\w``.
+    """
     text = unicodedata.normalize("NFC", text or "")
     text = text.replace("’", "'").replace("`", "'")
-    text = re.sub(r"[^\w\s'\.\+\-\*/%\(\)×÷:=]", " ", text, flags=re.UNICODE)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip().lower()
+    kept = [
+        ch
+        if (ch.isalnum() or ch in _KEEP or unicodedata.category(ch).startswith("M"))
+        else " "
+        for ch in text
+    ]
+    return " ".join("".join(kept).split()).lower()

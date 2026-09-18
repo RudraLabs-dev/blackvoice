@@ -216,6 +216,39 @@ as they are:
 You can point at bigger models by setting `speech.model_en` / `speech.model_hi`
 to an absolute path. See [Configuration](Configuration).
 
+### Better Hinglish: whisper.cpp
+
+The Vosk models above are enough to run. For a sentence that switches between
+Hindi and English mid-way — which two Vosk models racing on the same audio
+cannot really do, see [FAQ → Why not just
+Vosk?](FAQ#why-not-just-vosk) — install
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp) and fetch a model:
+
+```bash
+blackvoice setup --whisper                 # ggml-base-q5_1.bin, ~57 MB
+blackvoice doctor                          # confirms both the binary and model are found
+```
+
+Opt-in rather than downloaded automatically, because it is a compiled binary
+you install yourself (your package manager, or build it), not a Python
+package `pip install -e ".[all]"` above already covers. `speech.engine:
+"auto"` — the default — uses it once it is there and falls back to Vosk
+silently if it is not, so nothing breaks either way.
+
+### An AI backend sized for this machine
+
+Answering open questions (anything that is not a recognised command) needs a
+language model. The default, Ollama, runs locally:
+
+```bash
+blackvoice setup --ollama                                     # what's known to run acceptably
+blackvoice setup --ollama --model qwen2.5:1.5b --set-default  # fetch and switch to it
+```
+
+See [Configuration → ai](Configuration#ai--the-question-answering-backend) for
+Claude, OpenAI, or turning it off entirely — every voice command works
+without any of this.
+
 ## Running on login
 
 ```bash

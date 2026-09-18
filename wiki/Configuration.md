@@ -45,32 +45,65 @@ than crashing the assistant.
 ```jsonc
 "speech": {
   "mode": "hybrid",
+  "engine": "auto",
   "model_en": "vosk-model-small-en-us-0.15",
   "model_hi": "vosk-model-small-hi-0.22",
   "language": "both",
+  "whisper_binary": "",
+  "whisper_model": "ggml-base-q5_1.bin",
+  "whisper_language": "auto",
   "fallback_confidence": 0.55,
   "online_timeout": 6.0,
   "auto_download": true
 }
 ```
 
+Three offline tiers are tried in order, cloud only behind all of them:
+
+1. **whisper.cpp**, when `engine` allows it and both the binary and model are
+   present — one vocabulary covering Hindi and English, so it can transcribe a
+   sentence that switches language halfway instead of racing two guesses.
+2. **Vosk**, always loaded — the fallback when whisper.cpp is absent or came
+   back with nothing, and the only one of the three that streams, which is why
+   it also does wake-word detection on its own.
+3. **The cloud**, only in `hybrid` mode and only when the offline pass was
+   unsure.
+
 | Key | Default | What it does |
 |---|---|---|
-| `mode` | `hybrid` | `offline` — Vosk only, nothing ever leaves the machine. `online` — cloud only. `hybrid` — Vosk first, cloud only when unsure. |
-| `language` | `both` | `en`, `hi`, or `both`. With `both`, two models transcribe the same audio and the more confident wins — this is what makes Hinglish work. |
-| `fallback_confidence` | `0.55` | Below this Vosk score, `hybrid` retries online. Raise it to use the cloud more, lower it to use it less. |
+| `mode` | `hybrid` | `offline` — never touches the network. `online` — cloud only. `hybrid` — offline first, cloud only when unsure. |
+| `engine` | `auto` | `auto` uses whisper.cpp when it is installed and quietly falls back to Vosk otherwise. `whisper` or `vosk` pin one. |
+| `language` | `both` | Which Vosk model(s) to load — `en`, `hi`, or `both`. Only matters for the Vosk tier; whisper.cpp's `whisper_language` is separate. |
+| `whisper_binary` | *(blank)* | Path to `whisper-cli`. Blank searches `PATH`, then the copy a `.deb`/`.rpm` bundles. |
+| `whisper_model` | `ggml-base-q5_1.bin` | GGML model file — see [Speech models](Installation#speech-models). A bare name resolves under `~/.local/share/blackvoice/models`. |
+| `whisper_language` | `auto` | `auto` detects per utterance — the setting to leave alone, since pinning a language is exactly what breaks a sentence that switches halfway. `en` or `hi` force one. |
+| `fallback_confidence` | `0.55` | Below this Vosk score, `hybrid` retries online. Only reached when whisper.cpp did not answer. |
 | `model_en` / `model_hi` | small models | A bare name resolves under `~/.local/share/blackvoice/models`; an absolute path is used as-is. |
 | `online_timeout` | `6.0` | Seconds to wait on the cloud recogniser. |
-| `auto_download` | `true` | Fetch the models on first run when they are missing. Set to `false` on a metered connection and run `blackvoice setup` yourself. |
+| `auto_download` | `true` | Fetch the Vosk models on first run when they are missing. whisper.cpp is opt-in and not part of this — see below. |
 
 Nothing is downloaded when `mode` is `"online"` — that configuration never uses
 a local model.
 
 **Privacy:** set `mode` to `"offline"` and no audio is ever sent anywhere. In
-`hybrid`, audio only leaves the machine when Vosk is unsure *and* you are online.
+`hybrid`, audio only leaves the machine when the offline pass is unsure *and*
+you are online.
 
-**Using a larger model** — the small models are ~50 MB and tuned for commands.
-For better accuracy, download a larger one and point at it:
+**Installing whisper.cpp** is opt-in because it is a compiled binary rather
+than a Python package, and downloading one automatically on first run is a
+different kind of decision than fetching a Vosk model:
+
+```bash
+blackvoice setup --whisper                        # base model, ~57 MB
+blackvoice setup --whisper --model ggml-small-q5_1.bin --force
+```
+
+`blackvoice doctor` reports whether the binary and the model are both present
+— either one missing and `engine: "auto"` silently uses Vosk instead.
+
+**Using a larger Vosk model** — the small models are ~50 MB and tuned for
+commands. For better accuracy without whisper.cpp, download a larger one and
+point at it:
 
 ```jsonc
 "model_en": "/home/you/models/vosk-model-en-us-0.22"
@@ -78,6 +111,13 @@ For better accuracy, download a larger one and point at it:
 
 Loading two large models doubles the memory cost, so consider
 `"language": "en"` if you do.
+
+**Is it working well on your voice?** `blackvoice eval record` walks through a
+set of prompts covering English, Hindi and Hinglish and records your voice
+saying them; `blackvoice eval run` scores every backend you have installed
+against the same recordings — word error rate, and intent accuracy, which is
+the number that matters: whether a mishearing actually changed which command
+ran.
 
 ## `wake` — the wake word
 
@@ -173,8 +213,22 @@ For piper, set `piper_model` to the absolute path of a `.onnx` voice.
 ### Ollama (default, local)
 
 ```bash
-ollama pull llama3.2
+blackvoice setup --ollama
 ```
+
+with no `--model` reports what is installed and running, and lists models
+known to run acceptably on ordinary hardware — smallest first, one marked
+recommended. Pull one and switch to it in the same step:
+
+```bash
+blackvoice setup --ollama --model qwen2.5:1.5b --set-default
+```
+
+The default, `ollama_model: "llama3.2"`, is not on that curated list — it
+predates it and is left as-is rather than silently changed under you. The
+tray icon → Settings → AI shows the same models as an editable dropdown, so
+typing in a name that is not on the list still works if you know your
+machine can take it.
 
 Nothing leaves the machine. If Ollama is not running you get a clear message
 telling you to start it.
@@ -240,6 +294,37 @@ Turning `confirm_shell` off does **not** disable the deny-list — destructive
 commands are still refused. Read **[Security Model](Security-Model)** before
 changing anything here.
 
+## `control` — the local control socket
+
+```jsonc
+"control": {
+  "enabled": true,
+  "socket_path": ""
+}
+```
+
+A Unix domain socket at `$XDG_RUNTIME_DIR/blackvoice/control.sock`, opened
+whenever `blackvoice run` starts, for anything outside the process that wants
+to talk to a running engine — the PyQt6 tray already calls into it directly,
+so this exists for whatever does not: the early
+[Flutter frontend](https://github.com/RudraLabs-dev/blackvoice/tree/main/flutter_app)
+in the repository is the first thing using it.
+
+| Key | Default | What it does |
+|---|---|---|
+| `enabled` | `true` | Turn off if nothing on this machine needs the socket. |
+| `socket_path` | *(blank)* | Blank resolves the `XDG_RUNTIME_DIR` location above; set an absolute path to run two instances side by side, or if your desktop sets no runtime directory. |
+
+Nothing here is reachable from another machine — access control is the
+filesystem permissions on the socket file (`0600`, in a `0700` directory), not
+a token to configure. POSIX only: on a platform with no Unix domain sockets
+the engine simply does not open one, silently.
+
+The protocol is one JSON object per line, documented in
+`blackvoice/control_socket.py`'s module docstring alongside the two decisions
+behind it — a socket file rather than a port, and no library dependency for
+speaking it.
+
 ## `ui` — tray and overlay
 
 ```jsonc
@@ -288,8 +373,10 @@ For a different search engine, keep the `{query}` placeholder:
 | Path | Contents |
 |---|---|
 | `~/.config/blackvoice/config.json` | this file |
-| `~/.local/share/blackvoice/models/` | speech models |
+| `~/.local/share/blackvoice/models/` | speech models — Vosk and, if installed, the whisper.cpp GGML file |
 | `~/.local/share/blackvoice/notes.md` | your notes |
 | `~/.cache/blackvoice/blackvoice.log` | rotating log, 1 MB × 3 |
+| `$XDG_RUNTIME_DIR/blackvoice/control.sock` | the control socket, while running |
 
-These follow `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME` when set.
+These follow `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and
+`XDG_RUNTIME_DIR` when set.

@@ -34,6 +34,20 @@ MODEL_URLS = {
     ),
 }
 
+#: whisper.cpp models, as single GGML files - there is nothing to unpack.
+#: The q5_1 quantisations are the useful ones here: they are a third of the
+#: size of the float builds for a difference in accuracy that is hard to hear
+#: on short commands, and the assistant sits in the tray all day.
+WHISPER_URL_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
+
+#: name -> approximate size on disk, for what the CLI prints before it starts.
+WHISPER_MODELS = {
+    "ggml-tiny-q5_1.bin": 31,
+    "ggml-base-q5_1.bin": 57,
+    "ggml-small-q5_1.bin": 181,
+    "ggml-medium-q5_0.bin": 514,
+}
+
 #: Called with (language, downloaded_bytes, total_bytes); total is 0 when the
 #: server does not send a content length.
 ProgressFn = Callable[[str, int, int], None]
@@ -105,6 +119,63 @@ def download(
 
     if not target.exists():
         log.error("the archive did not contain %s", name)
+        return False
+
+    log.info("installed %s", name)
+    return True
+
+
+def whisper_url(name: str) -> str:
+    """Download URL for a GGML model name."""
+    return WHISPER_URL_BASE + name
+
+
+def download_whisper(
+    name: str,
+    dest: Optional[Path] = None,
+    on_progress: Optional[ProgressFn] = None,
+    timeout: float = 60.0,
+) -> bool:
+    """Fetch one whisper.cpp GGML model. Returns True on success.
+
+    Unlike the Vosk models this is a single file, so it is streamed straight to
+    its final name - through a ``.part`` sibling, because these run to hundreds
+    of megabytes and an interrupted download that left a short file in place
+    would be loaded by whisper.cpp as a corrupt model rather than as a missing
+    one, which is a much more confusing failure.
+    """
+    try:
+        import requests
+    except ImportError:
+        log.error("the requests library is needed to download models")
+        return False
+
+    target = dest or (MODELS_DIR / name)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    part = target.with_suffix(target.suffix + ".part")
+
+    log.info("downloading %s", name)
+    try:
+        with requests.get(whisper_url(name), stream=True, timeout=timeout) as response:
+            response.raise_for_status()
+            total = int(response.headers.get("content-length", 0))
+            done = 0
+            with part.open("wb") as handle:
+                for chunk in response.iter_content(chunk_size=1 << 16):
+                    handle.write(chunk)
+                    done += len(chunk)
+                    if on_progress:
+                        on_progress(name, done, total)
+    except Exception as exc:
+        log.error("could not download %s: %s", name, exc)
+        part.unlink(missing_ok=True)
+        return False
+
+    try:
+        part.replace(target)
+    except OSError as exc:
+        log.error("could not install %s: %s", name, exc)
+        part.unlink(missing_ok=True)
         return False
 
     log.info("installed %s", name)

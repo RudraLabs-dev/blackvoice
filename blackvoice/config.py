@@ -37,6 +37,11 @@ NOTES_FILE = DATA_DIR / "notes.md"
 HISTORY_FILE = DATA_DIR / "history.jsonl"
 LOG_FILE = CACHE_DIR / "blackvoice.log"
 
+#: Where the distribution packages put the native helpers they bundle
+#: (whisper.cpp, Piper). Searched only after PATH, so a build the user or
+#: their distribution installed is always preferred to ours.
+BUNDLED_BIN_DIR = Path("/opt/blackvoice/bin")
+
 
 @dataclass
 class AudioConfig:
@@ -53,7 +58,13 @@ class AudioConfig:
 
 @dataclass
 class SpeechConfig:
-    """Hybrid speech-to-text: Vosk offline first, cloud only as a fallback."""
+    """Offline speech-to-text, with the cloud only as a fallback.
+
+    Two offline engines are supported. whisper.cpp is a native binary driven
+    over a pipe - the same arrangement as Piper on the output side - so it adds
+    no Python extension module and nothing that has to be rebuilt when the
+    system interpreter changes. Vosk remains the fallback.
+    """
 
     #: "hybrid" | "offline" | "online"
     mode: str = "hybrid"
@@ -62,6 +73,36 @@ class SpeechConfig:
     model_hi: str = "vosk-model-small-hi-0.22"
     #: which language model to load: "en", "hi" or "both"
     language: str = "both"
+
+    # ---------------------------------------------------------- whisper.cpp
+    #: Which offline engine leads: "auto" | "whisper" | "vosk".
+    #: "auto" takes whisper.cpp when its binary *and* model are both present
+    #: and quietly uses Vosk otherwise, so an installation that has not fetched
+    #: the model yet behaves exactly as it did before.
+    engine: str = "auto"
+    #: whisper.cpp executable. Blank probes PATH first and the bundled copy
+    #: second - the same precedence the launcher gives PYTHONPATH, so a
+    #: distribution's own build wins over the one we ship.
+    whisper_binary: str = ""
+    #: GGML model file, resolved under MODELS_DIR when not absolute
+    whisper_model: str = "ggml-base-q5_1.bin"
+    #: "auto" detects the language per utterance; "en" or "hi" force one.
+    #: Leave it on auto - pinning a language is precisely what breaks a
+    #: sentence that switches halfway, which is the normal case here.
+    whisper_language: str = "auto"
+    #: decoder threads; 0 lets whisper.cpp choose from the core count
+    whisper_threads: int = 0
+    #: seconds to wait for a transcript before giving up on the utterance
+    whisper_timeout: float = 30.0
+    #: Passed to whisper.cpp as --prompt. Whisper conditions its decoding on
+    #: this text, so naming the command vocabulary pulls ambiguous audio
+    #: towards the words this assistant can actually act on. It is not a
+    #: grammar: anything may still be transcribed.
+    whisper_prompt: str = (
+        "Black, firefox kholo. Black, volume 40 karo. Black, screenshot lo. "
+        "Black, brightness badhao. Black, wifi band karo. Black, timer lagao. "
+        "Black, open chrome. Black, close the terminal. Black, lock the screen."
+    )
     #: below this Vosk confidence the hybrid mode retries online
     fallback_confidence: float = 0.55
     #: seconds to wait on the online recogniser before giving up
@@ -189,6 +230,29 @@ class SkillsConfig:
 
 
 @dataclass
+class ControlConfig:
+    """The local control socket: how any other UI talks to a running engine.
+
+    PyQt6's tray and overlay call straight into :class:`Engine`, because they
+    live in the same process. Anything that does not - a Flutter client above
+    all - needs a channel across the process boundary, and this is it: a
+    Unix domain socket under the user's own runtime directory, speaking one
+    JSON object per line. A filesystem socket rather than a TCP port because
+    the permissions on its containing directory are the access control - no
+    token to generate, store or leak - and because nothing here has any
+    business being reachable from another machine.
+
+    POSIX only, like the rest of this project's system integration; on any
+    other platform the socket is simply not opened.
+    """
+
+    enabled: bool = True
+    #: blank resolves under XDG_RUNTIME_DIR; an absolute path overrides it,
+    #: e.g. to run two instances side by side during development.
+    socket_path: str = ""
+
+
+@dataclass
 class Config:
     audio: AudioConfig = field(default_factory=AudioConfig)
     speech: SpeechConfig = field(default_factory=SpeechConfig)
@@ -198,6 +262,7 @@ class Config:
     safety: SafetyConfig = field(default_factory=SafetyConfig)
     ui: UIConfig = field(default_factory=UIConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
+    control: ControlConfig = field(default_factory=ControlConfig)
 
     # ------------------------------------------------------------------ paths
     @property
@@ -209,6 +274,27 @@ class Config:
         name = self.speech.model_en if which == "en" else self.speech.model_hi
         p = Path(name).expanduser()
         return p if p.is_absolute() else MODELS_DIR / name
+
+    def whisper_model_path(self) -> Path:
+        """Absolute path to the GGML file whisper.cpp should load."""
+        p = Path(self.speech.whisper_model).expanduser()
+        return p if p.is_absolute() else MODELS_DIR / self.speech.whisper_model
+
+    def control_socket_path(self) -> Path:
+        """Where the control socket listens, resolving the XDG default.
+
+        XDG_RUNTIME_DIR is shared with every other app (``/run/user/1000``),
+        so a subdirectory keeps this from colliding with anyone else's socket.
+        CACHE_DIR is already ours alone (``~/.cache/blackvoice``), so the
+        fallback used when a desktop somehow has no runtime dir does not
+        repeat the name.
+        """
+        if self.control.socket_path:
+            return Path(self.control.socket_path).expanduser()
+        runtime = os.environ.get("XDG_RUNTIME_DIR")
+        if runtime:
+            return Path(runtime) / APP_NAME / "control.sock"
+        return CACHE_DIR / "control.sock"
 
     # ------------------------------------------------------------------- i/o
     def to_dict(self) -> Dict[str, Any]:

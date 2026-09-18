@@ -11,7 +11,7 @@
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-black.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-black.svg)](https://www.python.org/)
 [![Platform: Linux](https://img.shields.io/badge/platform-linux-black.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-165%20passing-black.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-285%20passing-black.svg)](tests/)
 
 **[Documentation](https://github.com/RudraLabs-dev/blackvoice/wiki)** ·
 [Installation](https://github.com/RudraLabs-dev/blackvoice/wiki/Installation) ·
@@ -146,6 +146,7 @@ blackvoice mic             # live level meter — is the microphone working?
 blackvoice voice --install # a neural voice you can actually understand
 blackvoice devices         # list microphones
 blackvoice say "hello"     # test speech output
+blackvoice setup --ollama  # see and fetch small local models for the AI skill
 ```
 
 Every setting is editable from the tray icon → **Settings**, including whether

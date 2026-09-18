@@ -19,10 +19,18 @@ If this matters to you, set `"mode": "offline"` and stop wondering. See
 
 ### Does it really understand Hinglish?
 
-Yes, and not by detecting the language first. With `language: "both"` the English
-and Hindi models each transcribe the **same audio** and the more confident result
-wins. *“Black, firefox kholo”* and *“Black, open firefox”* both work, and so does
-a sentence that switches halfway.
+Yes, and not by detecting the language first. When whisper.cpp is installed
+(`blackvoice setup --whisper`) it transcribes the whole sentence with one
+vocabulary that covers both scripts, so *"Black, firefox kholo"* comes back as
+one sentence rather than two guesses to reconcile.
+
+Without whisper.cpp, the fallback is two Vosk models racing on the same audio,
+one English and one Hindi, and the more confident result wins. That is a
+weaker trick — a Vosk model can only emit words from its own lexicon, so on a
+sentence that switches language halfway neither model has the whole thing, and
+picking the more confident wrong half is not a fix. It is why whisper.cpp is
+worth installing if Hinglish is how you actually talk to it: see [Why not just
+Vosk?](#why-not-just-vosk) below.
 
 ### Will it run on Windows or macOS?
 
@@ -30,13 +38,35 @@ No. It is Linux-only by design — the system commands, desktop integration and
 packaging are all Linux. The core routing and skills are portable, but the parts
 that make it useful are not.
 
-### Why Vosk rather than Whisper?
+### Why not just Vosk?
 
-Vosk is small (~50 MB), fast on a CPU, and streams — which is what you want for
-short commands and a wake word that runs all day. Whisper is more accurate but
-heavier and slower, and it does not stream, so a wake word is awkward.
+It still does one job on its own: the **wake word**. Listening for "black" all
+day needs something that streams and costs almost nothing at idle, and a
+restricted Vosk grammar — deciding only between the wake phrases and
+`[unk]` — is exactly that.
 
-For dictation rather than commands, Whisper would be the better choice.
+**Transcribing the command itself** is a different job with a different best
+tool. `blackvoice setup --whisper` fetches a small
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp) model; once it is
+there, `speech.engine: "auto"` (the default) uses it to transcribe whatever
+was said between the wake word and the silence that ends the utterance, with
+Vosk's two-model race kept as the fallback when whisper.cpp is not installed
+or fails. It is a native binary run as a subprocess, the same arrangement
+Piper already uses for speech output, rather than a Python package — the
+libraries a Python Whisper binding would need (`ctranslate2`, `onnxruntime`)
+ship one build per Python version, which does not survive a distribution
+upgrading its system Python the way the `.deb`/`.rpm` packages need to.
+
+So: Vosk for streaming keyword-spotting, whisper.cpp for one-shot
+transcription of what was actually said. Using Vosk for both was the earlier
+design, and the sentence above about why is still true of the wake word —
+just not, any more, of the whole pipeline.
+
+Want to know how well it actually works on your own voice, in your own
+accent, before deciding whether to install it? `blackvoice eval record` walks
+through a set of prompts and records them; `blackvoice eval run` scores every
+available backend on the same recordings for word error rate and, more to the
+point, whether the mistake actually changed which command ran.
 
 ### Can I change the wake word?
 
@@ -100,7 +130,17 @@ touched again, so new default patterns do not reach an existing config. Run
 **Claude** or **OpenAI** if you want better answers and do not mind the
 questions leaving your machine. **None** if you only want commands.
 
-See [Configuration → AI backend](Configuration#ai--the-question-answering-backend).
+With Ollama, pick a model sized for the machine it runs on rather than typing
+one in from memory:
+
+```bash
+blackvoice setup --ollama                                     # see what's known to be light
+blackvoice setup --ollama --model qwen2.5:1.5b --set-default  # fetch it and switch to it
+```
+
+The tray icon → **Settings** → **AI** offers the same list as a dropdown,
+editable if you want a model that is not on it. See [Configuration → AI
+backend](Configuration#ai--the-question-answering-backend).
 
 ### Does it remember the conversation?
 

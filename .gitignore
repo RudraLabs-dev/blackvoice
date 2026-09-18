@@ -18,6 +18,7 @@ htmlcov/
 # Editors
 .vscode/
 .idea/
+.proxyai/
 *.swp
 *~
 
