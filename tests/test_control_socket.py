@@ -404,16 +404,20 @@ def test_bad_json_is_a_clean_error_not_a_dropped_connection(running_server, tmp_
 def test_a_bus_event_reaches_a_connected_client(running_server, tmp_path) -> None:
     client = _Client(tmp_path / "control.sock")
     try:
+        # socket.connect() returning only means the OS accepted the connection,
+        # not that _handle_client has run yet and added this writer to
+        # _clients - that happens on the control loop's own thread, on its own
+        # schedule. Publishing right after connect() races that registration:
+        # on a loaded CI runner the event can fire, and be broadcast to
+        # whatever is in _clients at that moment, before this writer is in it,
+        # and is then gone - there is no replay. A ping/pong round trip cannot
+        # complete until _handle_client has started and registered the writer,
+        # so it is the wait this test actually needs, not a longer timeout.
+        assert client.call("ping")["ok"] is True
+
         running_server.bus.publish(Topic.STATE, state="listening")
         # An unsolicited push, not a reply to any request - no "id" of ours.
-        deadline = time.monotonic() + 2.0
-        event = None
-        while time.monotonic() < deadline:
-            try:
-                event = client.recv_line()
-                break
-            except ConnectionError:
-                break
+        event = client.recv_line()
         assert event == {"event": "state", "state": "listening"}
     finally:
         client.close()
