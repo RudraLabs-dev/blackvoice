@@ -74,7 +74,7 @@ Set `speech.mode` to `"offline"` and nothing ever leaves the machine, either way
 
 ## Project status
 
-Version 0.3.0. The command routing, safety guard, configuration and skill layers
+Version 0.4.0. The command routing, safety guard, configuration and skill layers
 are covered by 285 tests. The audio path — microphone capture, recognition,
 wake word and speech output — needs a real Linux machine with a microphone to
 exercise, so treat it as the least-tested part of the system and report what

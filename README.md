@@ -86,13 +86,13 @@ The full command reference, in both languages, is in the
 **Debian, Ubuntu, Mint, Pop!\_OS**
 
 ```bash
-sudo apt install ./blackvoice_0.3.0-1_amd64.deb
+sudo apt install ./blackvoice_0.4.0-1_amd64.deb
 ```
 
 **Fedora, RHEL, openSUSE**
 
 ```bash
-sudo dnf install ./blackvoice-0.3.0-1.x86_64.rpm
+sudo dnf install ./blackvoice-0.4.0-1.x86_64.rpm
 ```
 
 Packages are on the
