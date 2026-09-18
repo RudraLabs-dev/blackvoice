@@ -1,0 +1,24 @@
+name: blackvoice_flutter
+description: >
+  A Flutter frontend for Black Voice, talking to the running engine over its
+  local control socket instead of calling into it directly.
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Deliberately nothing else. The control client is dart:io/dart:convert/
+  # dart:async only - the same reason blackvoice/control_socket.py is
+  # stdlib-only rather than reaching for websockets: one less thing to go out
+  # of date, and nothing here needs more than a socket and JSON lines.
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
