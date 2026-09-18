@@ -17,6 +17,7 @@ from .audio.stt import HybridSTT, Transcript
 from .audio.tts import Speaker
 from .audio.wake import WakeWordDetector, strip_wake_word
 from .config import Config, ensure_dirs
+from .control_socket import ControlServer
 from .core.bus import EventBus, Topic
 from .nlu.intents import Intent
 from .nlu.router import Router
@@ -86,6 +87,11 @@ class Engine:
             self.config.audio.sample_rate,
         )
 
+        # For anything not in this process - a Flutter frontend above all.
+        # Built here but only bound to a socket in start(), so constructing an
+        # Engine for a test never touches the filesystem or a thread for it.
+        self.control = ControlServer(self)
+
         self._state = State.IDLE
         self._running = threading.Event()
         self._activate = threading.Event()
@@ -125,6 +131,7 @@ class Engine:
         if self._running.is_set():
             return
         self._running.set()
+        self.control.start()
         if background:
             self._thread = threading.Thread(target=self._loop, name="engine", daemon=True)
             self._thread.start()
@@ -134,6 +141,7 @@ class Engine:
     def stop(self) -> None:
         self._running.clear()
         self._activate.set()  # unblock the loop if it is waiting
+        self.control.stop()
         self.utils_skill.shutdown()
         self.speaker.shutdown()
         self.bus.publish(Topic.SHUTDOWN)
@@ -352,12 +360,19 @@ class Engine:
         """A short report of what is and is not working - used by ``doctor``."""
         self.stt.load()
         self.wake.load()
+        offline = self.stt.offline_engine
+        if offline == "vosk":
+            offline_line = f"vosk ({len(self.stt.recognizers)} model(s) loaded)"
+        elif offline == "whisper":
+            offline_line = "whisper.cpp"
+        else:
+            offline_line = "none - run 'blackvoice setup'"
         lines = [
             f"Speech mode      {self.config.speech.mode}",
-            f"Offline models   {len(self.stt.recognizers)} loaded"
-            + (" (none - run 'blackvoice setup')" if not self.stt.has_offline else ""),
+            f"Offline engine   {offline_line}",
             f"Wake word        {'ready' if self.wake.ready else 'unavailable'}",
             f"Text to speech   {self.speaker.engine}",
             f"AI backend       {self.config.ai.provider}",
+            f"Control socket   {'listening' if self.control.running else 'not started'}",
         ]
         return "\n".join(lines)
