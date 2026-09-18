@@ -109,16 +109,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build blackvoice-${{ needs.verify.outputs.version }}.tar.gz
+      - name: Build blackvoice-${{ needs.verify.outputs.version }}-source.tar.gz
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
           # A portable tarball for distributions we do not package natively -
           # Arch, openSUSE, Gentoo and anyone who would rather read install.sh.
+          #
+          # Named *-source.tar.gz, not plain ${VERSION}.tar.gz: the wheel-and-
+          # sdist job's `python -m build` also produces a file named exactly
+          # blackvoice-${VERSION}.tar.gz - the sdist, PyPI's own convention -
+          # and the release job below collects every *.tar.gz it finds into
+          # one flat directory by basename. Two jobs handing it the same name
+          # means one silently overwrites the other, which is exactly what
+          # happened the first time this ran: the sdist survived and this
+          # tarball - the only one with install.sh in it - quietly did not
+          # ship, so the "anything else" install instructions on the release
+          # page pointed at a file with no install.sh inside it.
           mkdir -p dist
           git archive --format=tar.gz \
             --prefix="blackvoice-${VERSION}/" \
-            -o "dist/blackvoice-${VERSION}.tar.gz" HEAD
+            -o "dist/blackvoice-${VERSION}-source.tar.gz" HEAD
           ls -lh dist/
 
       - uses: actions/upload-artifact@v4
@@ -221,8 +232,24 @@ jobs:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
           mkdir -p release
-          find artifacts -type f \( -name '*.deb' -o -name '*.rpm' \
-            -o -name '*.tar.gz' -o -name '*.whl' \) -exec cp {} release/ \;
+          # -print0/read -d '' rather than -exec cp: this counts what was
+          # matched against what actually landed, so two jobs handing the
+          # same filename to different artifacts - a silent overwrite, one of
+          # them just gone from the release - fails the build loudly instead
+          # of shipping quietly wrong. See the source-tarball job for the
+          # collision that motivated this.
+          MATCHED=0
+          while IFS= read -r -d '' f; do
+            cp "$f" release/
+            MATCHED=$((MATCHED + 1))
+          done < <(find artifacts -type f \( -name '*.deb' -o -name '*.rpm' \
+            -o -name '*.tar.gz' -o -name '*.whl' \) -print0)
+          COLLECTED=$(find release -type f | wc -l)
+          if [ "$MATCHED" -ne "$COLLECTED" ]; then
+            echo "::error::$MATCHED artifact files matched but only $COLLECTED landed in release/ - two jobs produced the same filename and one silently overwrote the other. Matches below; give the losing one a distinct name." >&2
+            find artifacts -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.tar.gz' -o -name '*.whl' \)
+            exit 1
+          fi
           cd release
           sha256sum * > SHA256SUMS
           echo "--- release contents ---"
@@ -254,7 +281,7 @@ jobs:
 
           **Anything else**
           \`\`\`bash
-          tar xzf blackvoice-${VERSION}.tar.gz
+          tar xzf blackvoice-${VERSION}-source.tar.gz
           cd blackvoice-${VERSION}
           ./install.sh --system
           \`\`\`
