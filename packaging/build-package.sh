@@ -141,9 +141,11 @@ cat <<'MSG'
   your home directory. Models are per-user, so this cannot happen here.
 
   Voice commands all work as they are. Answering open questions needs a
-  language model, which is a separate, optional install:
+  language model - if Ollama is already on this machine, Black Voice wakes
+  it and fetches a small one on first run automatically, nothing to do.
+  Otherwise it is a separate, optional install:
 
-    https://ollama.com/download     then:  ollama pull llama3.2
+    https://ollama.com/download
 
   Documentation: https://github.com/RudraLabs-dev/blackvoice/wiki
 

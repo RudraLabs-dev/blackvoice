@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import subprocess
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
@@ -116,6 +117,46 @@ def not_running_message() -> str:
         "Ollama is not installed. Get it from https://ollama.com/download, "
         "then run: ollama serve"
     )
+
+
+def try_start_service(timeout: float = 10.0) -> bool:
+    """Best-effort attempt to start an already-installed Ollama service.
+
+    This never installs Ollama - that stays a manual, documented step (see
+    :func:`not_running_message`); the line this project does not cross is an
+    automatic code path fetching and running a third-party installer as root,
+    which is exactly the ``curl | sh`` shape :data:`SafetyConfig.blocked_patterns`
+    already refuses when a *user* asks the terminal skill to run it.
+
+    What this does is smaller and safer: nudge a service that is already on
+    the machine but not currently running. Most desktop installs of Ollama
+    register a systemd unit and start it immediately, so by the time Black
+    Voice runs it is usually already up - this exists for the case where it
+    was stopped, or set up as a user unit rather than a system one. Silent
+    failure (no systemd, no such unit, no permission for a system unit
+    started by an unprivileged process) is the expected outcome on plenty of
+    machines and is not an error to surface - :func:`is_reachable` is what
+    actually decides whether it worked.
+    """
+    if not shutil.which("systemctl"):
+        return False
+    for argv in (
+        ["systemctl", "--user", "start", "ollama"],
+        ["systemctl", "start", "ollama"],
+    ):
+        try:
+            result = subprocess.run(
+                argv,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if result.returncode == 0:
+            return True
+    return False
 
 
 class OllamaError(RuntimeError):

@@ -201,6 +201,7 @@ For piper, set `piper_model` to the absolute path of a `.onnx` voice.
   "provider": "ollama",
   "ollama_url": "http://localhost:11434",
   "ollama_model": "llama3.2",
+  "auto_setup": true,
   "anthropic_model": "claude-opus-5",
   "openai_model": "gpt-4o-mini",
   "api_key": "",
@@ -210,7 +211,24 @@ For piper, set `piper_model` to the absolute path of a `.onnx` voice.
 }
 ```
 
+| Key | Default | What it does |
+|---|---|---|
+| `auto_setup` | `true` | With `provider: "ollama"`: on first run, wake an already-installed Ollama if it is stopped, and pull `ollama_model` if it is not there yet - see below. |
+
 ### Ollama (default, local)
+
+**If Ollama is already on the machine, there is nothing to do.** On first
+run, Black Voice checks whether it is installed (`auto_setup: true`, the
+default); if so, it wakes the service if it is stopped and pulls
+`ollama_model` if that is not already fetched, and questions just work. This
+never installs Ollama itself - that stays a manual, one-time step, the same
+way whisper.cpp does (see [speech.engine](#speech--recognition)): a
+package's automatic code path fetching and running a third-party installer
+as root is precisely the shape `safety.blocked_patterns` already refuses
+when a *user* asks the terminal skill to do it, and this project holds
+itself to the same line.
+
+**If Ollama is not installed yet:**
 
 ```bash
 blackvoice setup --ollama
@@ -230,8 +248,8 @@ tray icon → Settings → AI shows the same models as an editable dropdown, so
 typing in a name that is not on the list still works if you know your
 machine can take it.
 
-Nothing leaves the machine. If Ollama is not running you get a clear message
-telling you to start it.
+Nothing leaves the machine. If Ollama is not installed at all, you get a
+clear message with the install link the first time a question needs it.
 
 ### Claude
 

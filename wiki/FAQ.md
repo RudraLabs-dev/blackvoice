@@ -130,8 +130,9 @@ touched again, so new default patterns do not reach an existing config. Run
 **Claude** or **OpenAI** if you want better answers and do not mind the
 questions leaving your machine. **None** if you only want commands.
 
-With Ollama, pick a model sized for the machine it runs on rather than typing
-one in from memory:
+If Ollama is already installed, there is nothing else to do — Black Voice
+wakes it and pulls a model on first run by itself. Otherwise, pick a model
+sized for the machine it runs on rather than typing one in from memory:
 
 ```bash
 blackvoice setup --ollama                                     # see what's known to be light

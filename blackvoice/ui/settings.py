@@ -83,6 +83,8 @@ HELP: Dict[str, str] = {
     "ai.ollama_model": "Pull it first: blackvoice setup --ollama --model <name>. "
                        "The dropdown lists models known to run well on ordinary hardware; "
                        "type any other tag if you know your machine can take it.",
+    "ai.auto_setup": "If Ollama is already installed, wake it and fetch this model on first "
+                     "run automatically - no setup --ollama needed. Never installs Ollama itself.",
     "ai.anthropic_model": "Needs ANTHROPIC_API_KEY in the environment.",
     "ai.openai_model": "Needs OPENAI_API_KEY in the environment.",
     "ai.api_key": "Leave empty. The environment variable is the safer place — this file is world-readable.",

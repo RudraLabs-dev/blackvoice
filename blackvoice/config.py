@@ -157,6 +157,12 @@ class AIConfig:
     provider: str = "ollama"
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2"
+    #: When provider is "ollama": on first run, wake an already-installed
+    #: Ollama service if it is stopped, and fetch ollama_model if it is not
+    #: pulled yet - no manual `setup --ollama` needed for whoever already has
+    #: Ollama on the machine. Never installs Ollama itself; that stays
+    #: manual and documented, on purpose - see ollama_models.py.
+    auto_setup: bool = True
     anthropic_model: str = "claude-opus-5"
     openai_model: str = "gpt-4o-mini"
     #: left blank on purpose - read from ANTHROPIC_API_KEY / OPENAI_API_KEY

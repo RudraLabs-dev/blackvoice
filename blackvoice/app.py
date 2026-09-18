@@ -8,6 +8,7 @@ the event bus and calls :meth:`Engine.activate` / :meth:`Engine.submit_text`.
 from __future__ import annotations
 
 import logging
+import shutil
 import threading
 import time
 from typing import Callable, Optional
@@ -183,9 +184,73 @@ class Engine:
         self._set_state(State.IDLE)
         return ok
 
+    def ensure_ai_backend(self) -> None:
+        """Get Ollama answering questions with no manual step, when it can be.
+
+        Deliberately narrow about what "automatic" means here. If Ollama
+        itself is not installed, this does nothing - the friendly error
+        AISkill already gives at answer time explains that, and installing
+        third-party software from an unattended code path is a line this
+        project does not cross (see ollama_models.try_start_service's
+        docstring: it is the same ``curl | sh`` shape SafetyConfig already
+        refuses when a user asks the terminal skill to run it).
+
+        What it does do, for whoever already has Ollama on the machine: nudge
+        the service awake if it is stopped, and fetch ollama_model the first
+        time it is not already pulled - the same "first run is the right
+        moment for a network fetch" reasoning ensure_models() applies to the
+        speech models, running as the real user rather than whatever ran the
+        package's postinstall script as root.
+        """
+        if self.config.ai.provider != "ollama" or not self.config.ai.auto_setup:
+            return
+
+        from . import ollama_models
+
+        if not shutil.which("ollama"):
+            return
+
+        url = self.config.ai.ollama_url
+        if not ollama_models.is_reachable(url):
+            ollama_models.try_start_service()
+            if not ollama_models.is_reachable(url, timeout=5.0):
+                return  # nudged, not force-started - not our place to do more
+
+        model = self.config.ai.ollama_model
+        pulled = ollama_models.pulled_models(url)
+        if pulled is not None and model in pulled:
+            return
+
+        self.bus.publish(
+            Topic.REPLY, speech="", ok=True,
+            display=f"First run: fetching the {model} language model so open "
+                     "questions can be answered. This happens once - turn it "
+                     "off with ai.auto_setup: false.",
+        )
+
+        last_percent = -1
+
+        def _progress(_status: str, done: int, total: int) -> None:
+            nonlocal last_percent
+            percent = int(done * 100 / total) if total else 0
+            if percent == last_percent:
+                return
+            last_percent = percent
+            self.bus.publish(Topic.STATE, state=State.SETUP, percent=percent, done=done, total=total)
+
+        self._set_state(State.SETUP)
+        try:
+            ollama_models.pull(model, url, on_progress=_progress)
+        except ollama_models.OllamaError as exc:
+            log.warning("automatic Ollama model pull failed: %s", exc)
+            self.bus.publish(Topic.REPLY, speech="", ok=False, display=str(exc))
+        finally:
+            self._set_state(State.IDLE)
+
     # -------------------------------------------------------- audio loop
     def _loop(self) -> None:
         self.ensure_models()
+        self.ensure_ai_backend()
         self.stt.load()
         wake_ready = self.wake.load()
         if not wake_ready:

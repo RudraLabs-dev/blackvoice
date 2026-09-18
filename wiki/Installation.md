@@ -238,16 +238,24 @@ silently if it is not, so nothing breaks either way.
 ### An AI backend sized for this machine
 
 Answering open questions (anything that is not a recognised command) needs a
-language model. The default, Ollama, runs locally:
+language model. The default, Ollama, runs locally - and if it is already on
+this machine, Black Voice notices on first run, wakes it if it is stopped,
+and pulls a model on its own. Nothing to install for that beyond Ollama
+itself:
+
+https://ollama.com/download
+
+If it is not there yet, or you would rather pick the model up front:
 
 ```bash
 blackvoice setup --ollama                                     # what's known to run acceptably
 blackvoice setup --ollama --model qwen2.5:1.5b --set-default  # fetch and switch to it
 ```
 
-See [Configuration → ai](Configuration#ai--the-question-answering-backend) for
-Claude, OpenAI, or turning it off entirely — every voice command works
-without any of this.
+Black Voice never installs Ollama itself, even automatically - see
+[Configuration → ai](Configuration#ai--the-question-answering-backend) for
+why, and for Claude, OpenAI, or turning it off entirely. Every voice command
+works without any of this.
 
 ## Running on login
 
