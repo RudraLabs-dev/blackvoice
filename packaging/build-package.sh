@@ -147,6 +147,10 @@ cat <<'MSG'
 
     https://ollama.com/download
 
+  ...or set ai.auto_install: true and Black Voice fetches its own private
+  copy on first run instead (about 1.3 GB, no root - off by default only
+  because of that size).
+
   Documentation: https://github.com/RudraLabs-dev/blackvoice/wiki
 
 MSG

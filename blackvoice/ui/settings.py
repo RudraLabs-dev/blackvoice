@@ -84,7 +84,10 @@ HELP: Dict[str, str] = {
                        "The dropdown lists models known to run well on ordinary hardware; "
                        "type any other tag if you know your machine can take it.",
     "ai.auto_setup": "If Ollama is already installed, wake it and fetch this model on first "
-                     "run automatically - no setup --ollama needed. Never installs Ollama itself.",
+                     "run automatically - no setup --ollama needed.",
+    "ai.auto_install": "If Ollama is not found anywhere, fetch a private copy on first run and "
+                       "run it as a background service - no root, but about 1.3 GB. Off by "
+                       "default; nothing this size should download without asking first.",
     "ai.anthropic_model": "Needs ANTHROPIC_API_KEY in the environment.",
     "ai.openai_model": "Needs OPENAI_API_KEY in the environment.",
     "ai.api_key": "Leave empty. The environment variable is the safer place — this file is world-readable.",

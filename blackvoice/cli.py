@@ -253,6 +253,54 @@ def _setup_whisper(args: argparse.Namespace) -> int:
     return 0 if binary else 1
 
 
+def _install_ollama(config: Config) -> int:
+    """Fetch a private copy of Ollama right now, instead of waiting for
+    ai.auto_install to do it on the next run - same code path, same result,
+    just on demand.
+    """
+    from . import ollama_models
+
+    existing = ollama_models.find_binary()
+    if existing is not None:
+        print(f"{OK} Ollama is already available at {existing}")
+        print("  nothing to install")
+        return 0
+
+    print(f"{ARROW} downloading Ollama (about 1.3 GB - no small build is published "
+          "for this platform)")
+    last = [-1]
+
+    def _progress(status: str, done: int, total: int) -> None:
+        if status == "extracting":
+            print(chr(13) + "  extracting..." + " " * 20)
+            return
+        percent = int(done * 100 / total) if total else 0
+        if percent == last[0]:
+            return
+        last[0] = percent
+        print(chr(13) + f"  {percent:3d}%  {done / 2**20:7.1f} MiB", end="", flush=True)
+
+    try:
+        binary = ollama_models.download_and_install(on_progress=_progress)
+    except ollama_models.OllamaError as exc:
+        print()
+        print(f"{BAD} {exc}")
+        return 1
+
+    print()
+    print(f"{OK} installed to {binary}")
+
+    ollama_models.write_user_service(binary)
+    if ollama_models.enable_and_start_user_service():
+        print(f"{OK} running as a --user systemd service (systemctl --user status ollama)")
+    else:
+        print(f"{DOT} could not enable the systemd service - start it yourself:")
+        print(f"  {binary} serve &")
+
+    print(f"\n{BULLET} pull a model next: blackvoice setup --ollama --model <name>")
+    return 0
+
+
 def _setup_ollama(args: argparse.Namespace) -> int:
     """Pull a small Ollama model, and optionally make it the active one.
 
@@ -263,10 +311,20 @@ def _setup_ollama(args: argparse.Namespace) -> int:
     from . import ollama_models
 
     config = Config.load()
+
+    if args.install:
+        return _install_ollama(config)
+
     reachable = ollama_models.is_reachable(config.ai.ollama_url)
     pulled = ollama_models.pulled_models(config.ai.ollama_url) if reachable else None
 
     if not args.model:
+        binary = ollama_models.find_binary()
+        if binary is None:
+            print(f"{BAD} Ollama is not installed anywhere")
+            print(f"  {ollama_models.not_running_message()}")
+            print("  or: blackvoice setup --ollama --install  (~1.3 GB, no root)")
+            return 1
         print(f"{OK if reachable else BAD} Ollama at {config.ai.ollama_url}"
               f"{'' if reachable else ' - ' + ollama_models.not_running_message()}")
         print(f"\nCurrently configured: {config.ai.ollama_model}")
@@ -569,21 +627,40 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if provider == "none":
         print(f"  {DOT} switched off - unrecognised phrases just say so")
     elif provider == "ollama":
-        reachable = ollama_models.is_reachable(config.ai.ollama_url)
-        print(f"  {OK if reachable else BAD} Ollama server at {config.ai.ollama_url}")
-        if not reachable:
-            print(f"      {ollama_models.not_running_message()}")
-            problems.append("ollama serve")
+        binary = ollama_models.find_binary()
+
+        if binary is None:
+            print(f"  {BAD} Ollama is not installed anywhere")
+            if config.ai.auto_install:
+                print(f"      {DOT} ai.auto_install is on - the next run fetches a private "
+                      "copy (~1.3 GB) and runs it as a background service, no root")
+                problems.append("blackvoice run  # auto_install does the rest")
+            else:
+                print(f"      {ollama_models.not_running_message()}")
+                print(f"      {DOT} or set ai.auto_install: true to fetch one automatically "
+                      "(~1.3 GB, no root)")
+                problems.append("https://ollama.com/download")
         else:
-            pulled = ollama_models.pulled_models(config.ai.ollama_url) or []
-            have = config.ai.ollama_model in pulled
-            print(f"  {OK if have else BAD} model {config.ai.ollama_model!r} "
-                  f"{'is pulled' if have else 'is not pulled yet'}")
-            if not have:
-                problems.append(f"blackvoice setup --ollama --model {config.ai.ollama_model}")
-            if config.ai.ollama_model not in ollama_models.LIGHTWEIGHT_MODELS:
-                print(f"      {DOT} not in the curated lightweight list - "
-                      "make sure this machine can actually run it")
+            private = binary == str(ollama_models.bundled_binary_path())
+            label = "Ollama (private copy set up by Black Voice)" if private else "Ollama"
+            reachable = ollama_models.is_reachable(config.ai.ollama_url)
+            print(f"  {OK if reachable else BAD} {label} at {config.ai.ollama_url}")
+
+            if not reachable:
+                message = ("not running - try: systemctl --user start ollama" if private
+                            else ollama_models.not_running_message())
+                print(f"      {message}")
+                problems.append("ollama serve")
+            else:
+                pulled = ollama_models.pulled_models(config.ai.ollama_url) or []
+                have = config.ai.ollama_model in pulled
+                print(f"  {OK if have else BAD} model {config.ai.ollama_model!r} "
+                      f"{'is pulled' if have else 'is not pulled yet'}")
+                if not have:
+                    problems.append(f"blackvoice setup --ollama --model {config.ai.ollama_model}")
+                if config.ai.ollama_model not in ollama_models.LIGHTWEIGHT_MODELS:
+                    print(f"      {DOT} not in the curated lightweight list - "
+                          "make sure this machine can actually run it")
     elif provider in ("anthropic", "openai"):
         env_var = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
         has_key = bool(config.ai.api_key or os.environ.get(env_var))
@@ -944,6 +1021,11 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument(
         "--set-default", action="store_true",
         help="with --ollama, also make the pulled model the active one",
+    )
+    setup.add_argument(
+        "--install", action="store_true",
+        help="with --ollama and no --model: fetch Ollama itself if it is not "
+             "installed anywhere (~1.3 GB, no root) and run it as a --user service",
     )
     setup.set_defaults(func=cmd_setup)
 

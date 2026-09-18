@@ -131,10 +131,14 @@ touched again, so new default patterns do not reach an existing config. Run
 questions leaving your machine. **None** if you only want commands.
 
 If Ollama is already installed, there is nothing else to do — Black Voice
-wakes it and pulls a model on first run by itself. Otherwise, pick a model
-sized for the machine it runs on rather than typing one in from memory:
+wakes it and pulls a model on first run by itself. If it is not installed at
+all, set `ai.auto_install: true` and Black Voice fetches a private copy for
+you too (about 1.3 GB — there is no small build, which is the whole reason
+this is opt-in rather than the default). Either way, pick a model sized for
+the machine it runs on rather than typing one in from memory:
 
 ```bash
+blackvoice setup --ollama --install                           # only if Ollama itself is missing
 blackvoice setup --ollama                                     # see what's known to be light
 blackvoice setup --ollama --model qwen2.5:1.5b --set-default  # fetch it and switch to it
 ```

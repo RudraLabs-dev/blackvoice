@@ -245,17 +245,31 @@ itself:
 
 https://ollama.com/download
 
-If it is not there yet, or you would rather pick the model up front:
+**Or skip that too:** set `ai.auto_install: true` in the config, and Black
+Voice fetches a private copy for you on first run and runs it as a
+background service - no root, nothing else to do. It is opt-in rather than
+the default for one reason worth knowing before you turn it on: there is no
+small build. Upstream's smallest general Linux release is over a gigabyte,
+which is a very different download than the rest of what this project
+fetches automatically. Turn it on right now instead of waiting for the next
+run:
+
+```bash
+blackvoice setup --ollama --install
+```
+
+Either way, pick a model:
 
 ```bash
 blackvoice setup --ollama                                     # what's known to run acceptably
 blackvoice setup --ollama --model qwen2.5:1.5b --set-default  # fetch and switch to it
 ```
 
-Black Voice never installs Ollama itself, even automatically - see
-[Configuration → ai](Configuration#ai--the-question-answering-backend) for
-why, and for Claude, OpenAI, or turning it off entirely. Every voice command
-works without any of this.
+See [Configuration → ai](Configuration#ai--the-question-answering-backend)
+for what `auto_install` does and does not do (it never runs Ollama's own
+install script, on principle - see there for why), and for Claude, OpenAI,
+or turning question-answering off entirely. Every voice command works
+without any of this.
 
 ## Running on login
 

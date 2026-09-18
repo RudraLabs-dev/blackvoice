@@ -61,6 +61,7 @@ def test_does_nothing_when_ollama_is_not_installed(engine, monkeypatch) -> None:
 def test_nudges_a_stopped_service_then_gives_up_if_it_stays_down(engine, monkeypatch) -> None:
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/ollama")
     monkeypatch.setattr(om, "is_reachable", lambda *a, **k: False)
+    monkeypatch.setattr("blackvoice.app.time.sleep", lambda s: None)  # do not really wait 5s
     started = []
     monkeypatch.setattr(om, "try_start_service", lambda: started.append(True))
     pulled_called = []
@@ -178,6 +179,108 @@ def test_a_stale_state_does_not_flood_the_bus_with_repeat_percentages(engine, mo
 
     states = [p for t, p in recorder.events if t == Topic.STATE and "percent" in p]
     assert len(states) == 1
+
+
+# --------------------------------------------------------------------------- #
+# Engine.ensure_ai_backend: the auto_install path (off by default)
+# --------------------------------------------------------------------------- #
+def test_auto_install_off_does_nothing_when_ollama_is_absent(engine, monkeypatch) -> None:
+    """The current default: find nothing, do nothing, no download attempted."""
+    assert engine.config.ai.auto_install is False
+    monkeypatch.setattr(om, "find_binary", lambda: None)
+    called = []
+    monkeypatch.setattr(om, "download_and_install", lambda **k: called.append(True))
+    engine.ensure_ai_backend()
+    assert called == []
+
+
+def test_auto_install_on_installs_wires_the_service_and_pulls(engine, monkeypatch) -> None:
+    engine.config.ai.auto_install = True
+    monkeypatch.setattr(om, "find_binary", lambda: None)
+    monkeypatch.setattr(om, "download_and_install", lambda on_progress=None: "/priv/bin/ollama")
+
+    service_written = []
+    monkeypatch.setattr(om, "write_user_service", lambda binary: service_written.append(binary))
+    service_started = []
+    monkeypatch.setattr(om, "enable_and_start_user_service", lambda: service_started.append(True))
+
+    monkeypatch.setattr(om, "is_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(om, "pulled_models", lambda *a, **k: [])
+    pulled = []
+    monkeypatch.setattr(om, "pull", lambda name, url, on_progress=None: pulled.append(name))
+
+    recorder = _Recorder(engine.bus)
+    engine.ensure_ai_backend()
+
+    assert service_written == ["/priv/bin/ollama"]
+    assert service_started == [True]
+    assert pulled == [engine.config.ai.ollama_model]
+    installing = [p["display"] for t, p in recorder.events if t == Topic.REPLY]
+    assert any("installing a local AI engine" in d for d in installing)
+
+
+def test_auto_install_failure_is_reported_and_stops_there(engine, monkeypatch) -> None:
+    engine.config.ai.auto_install = True
+    monkeypatch.setattr(om, "find_binary", lambda: None)
+
+    def _boom(on_progress=None):
+        raise om.OllamaError("no build for this machine")
+
+    monkeypatch.setattr(om, "download_and_install", _boom)
+    service_written = []
+    monkeypatch.setattr(om, "write_user_service", lambda binary: service_written.append(binary))
+    pulled = []
+    monkeypatch.setattr(om, "pull", lambda name, url, on_progress=None: pulled.append(name))
+
+    recorder = _Recorder(engine.bus)
+    engine.ensure_ai_backend()  # must not raise
+
+    assert service_written == []  # never got as far as wiring up a service
+    assert pulled == []
+    failures = [p for t, p in recorder.events if t == Topic.REPLY and not p.get("ok", True)]
+    assert any("no build for this machine" in f["display"] for f in failures)
+    assert engine.state == State.IDLE
+
+
+def test_a_preexisting_binary_is_preferred_over_installing_one(engine, monkeypatch) -> None:
+    """find_binary() returning something at all means auto_install is never touched."""
+    engine.config.ai.auto_install = True
+    monkeypatch.setattr(om, "find_binary", lambda: "/usr/bin/ollama")
+    monkeypatch.setattr(om, "is_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(om, "pulled_models", lambda *a, **k: [engine.config.ai.ollama_model])
+
+    called = []
+    monkeypatch.setattr(om, "download_and_install", lambda **k: called.append(True))
+
+    engine.ensure_ai_backend()
+
+    assert called == []
+
+
+# --------------------------------------------------------------------------- #
+# Engine._wait_for_ollama
+# --------------------------------------------------------------------------- #
+def test_wait_for_ollama_retries_then_succeeds(monkeypatch) -> None:
+    from blackvoice.app import Engine
+
+    monkeypatch.setattr("blackvoice.app.time.sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def _reachable(url, timeout=1.0):
+        calls["n"] += 1
+        return calls["n"] >= 3
+
+    fake_om = type("M", (), {"is_reachable": staticmethod(_reachable)})
+    assert Engine._wait_for_ollama(fake_om, "http://x", tries=5, interval=0.01) is True
+    assert calls["n"] == 3
+
+
+def test_wait_for_ollama_gives_up_after_the_last_try(monkeypatch) -> None:
+    from blackvoice.app import Engine
+
+    monkeypatch.setattr("blackvoice.app.time.sleep", lambda s: None)
+    fake_om = type("M", (), {"is_reachable": staticmethod(lambda url, timeout=1.0: False)})
+    assert Engine._wait_for_ollama(fake_om, "http://x", tries=3, interval=0.01) is False
 
 
 # --------------------------------------------------------------------------- #

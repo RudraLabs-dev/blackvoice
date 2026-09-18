@@ -202,6 +202,7 @@ For piper, set `piper_model` to the absolute path of a `.onnx` voice.
   "ollama_url": "http://localhost:11434",
   "ollama_model": "llama3.2",
   "auto_setup": true,
+  "auto_install": false,
   "anthropic_model": "claude-opus-5",
   "openai_model": "gpt-4o-mini",
   "api_key": "",
@@ -213,22 +214,44 @@ For piper, set `piper_model` to the absolute path of a `.onnx` voice.
 
 | Key | Default | What it does |
 |---|---|---|
-| `auto_setup` | `true` | With `provider: "ollama"`: on first run, wake an already-installed Ollama if it is stopped, and pull `ollama_model` if it is not there yet - see below. |
+| `auto_setup` | `true` | With `provider: "ollama"`: on first run, wake an already-installed Ollama if it is stopped, and pull `ollama_model` if it is not there yet. |
+| `auto_install` | `false` | On first run, if Ollama is not found *anywhere*, fetch a private copy for this user and run it as a background service. Off by default - see why below. |
 
 ### Ollama (default, local)
 
 **If Ollama is already on the machine, there is nothing to do.** On first
-run, Black Voice checks whether it is installed (`auto_setup: true`, the
-default); if so, it wakes the service if it is stopped and pulls
-`ollama_model` if that is not already fetched, and questions just work. This
-never installs Ollama itself - that stays a manual, one-time step, the same
-way whisper.cpp does (see [speech.engine](#speech--recognition)): a
-package's automatic code path fetching and running a third-party installer
-as root is precisely the shape `safety.blocked_patterns` already refuses
-when a *user* asks the terminal skill to do it, and this project holds
-itself to the same line.
+run (`auto_setup: true`, the default), Black Voice wakes the service if it
+is stopped and pulls `ollama_model` if that is not already fetched, and
+questions just work.
 
-**If Ollama is not installed yet:**
+**If it is not on the machine at all, that stays your call.** Set
+`auto_install: true` and Black Voice fetches a private copy for just this
+user on first run and runs it as a `systemctl --user` service - genuinely
+no manual step after that, ever, for anyone who turns it on. It is off by
+default for one concrete reason: there is no small build. Upstream publishes
+one general Linux build per architecture and it bundles CUDA support
+already; the smallest one for x86_64 is over a gigabyte. That is a
+meaningfully different bandwidth and disk commitment than the ~90 MB of
+speech models this project already fetches automatically, and a default
+should not make that choice on your behalf.
+
+What `auto_install` never does, on or off, is run Ollama's own installer
+(`curl -fsSL https://ollama.com/install.sh | sh`) - that is precisely the
+shape `safety.blocked_patterns` already refuses when a *user* asks the
+terminal skill to run it, and root is not a place this project's own
+automatic code paths get to make an exception for themselves. It downloads
+the plain release archive instead, extracts it for just this user, and
+writes its own `~/.config/systemd/user/ollama.service` - no root at any
+point, and a pre-existing system install always takes precedence over this
+private one (see `ollama_models.find_binary`).
+
+Turn it on and fetch it right now, rather than waiting for the next run:
+
+```bash
+blackvoice setup --ollama --install
+```
+
+**Pick a model,** whichever way Ollama got there:
 
 ```bash
 blackvoice setup --ollama

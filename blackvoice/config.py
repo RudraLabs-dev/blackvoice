@@ -160,9 +160,16 @@ class AIConfig:
     #: When provider is "ollama": on first run, wake an already-installed
     #: Ollama service if it is stopped, and fetch ollama_model if it is not
     #: pulled yet - no manual `setup --ollama` needed for whoever already has
-    #: Ollama on the machine. Never installs Ollama itself; that stays
-    #: manual and documented, on purpose - see ollama_models.py.
+    #: Ollama on the machine.
     auto_setup: bool = True
+    #: Off by default, unlike auto_setup above: when Ollama is not found
+    #: anywhere, fetch a private copy on first run and run it as a --user
+    #: systemd service, no root involved. Off by default because there is no
+    #: small build to fetch - upstream's smallest general Linux release is
+    #: over a gigabyte - so this is a very different bandwidth and disk
+    #: commitment than anything else this project downloads automatically,
+    #: and defaults should not make that choice for someone silently.
+    auto_install: bool = False
     anthropic_model: str = "claude-opus-5"
     openai_model: str = "gpt-4o-mini"
     #: left blank on purpose - read from ANTHROPIC_API_KEY / OPENAI_API_KEY

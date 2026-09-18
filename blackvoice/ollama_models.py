@@ -20,10 +20,15 @@ to the Whisper models in :mod:`blackvoice.models`.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Dict, List, Optional
+
+from .config import DATA_DIR
 
 log = logging.getLogger(__name__)
 
@@ -122,11 +127,14 @@ def not_running_message() -> str:
 def try_start_service(timeout: float = 10.0) -> bool:
     """Best-effort attempt to start an already-installed Ollama service.
 
-    This never installs Ollama - that stays a manual, documented step (see
-    :func:`not_running_message`); the line this project does not cross is an
-    automatic code path fetching and running a third-party installer as root,
-    which is exactly the ``curl | sh`` shape :data:`SafetyConfig.blocked_patterns`
-    already refuses when a *user* asks the terminal skill to run it.
+    This never installs anything - see :func:`download_and_install` for the
+    opt-in code path that does. The line this function itself stays on the
+    right side of is running a third-party installer *as root*: Ollama's own
+    is ``curl -fsSL https://ollama.com/install.sh | sh``, exactly the shape
+    :data:`SafetyConfig.blocked_patterns` already refuses when a *user* asks
+    the terminal skill to run it, which is why installing Ollama here goes
+    through its plain release archive instead, as an ordinary user, never
+    through that script.
 
     What this does is smaller and safer: nudge a service that is already on
     the machine but not currently running. Most desktop installs of Ollama
@@ -224,3 +232,271 @@ def pull(
                 on_progress(status or last_status, data.get("completed", 0), data.get("total", 0))
 
     log.info("pulled Ollama model %s", name)
+
+
+# --------------------------------------------------------------------------- #
+# Installing Ollama itself - opt-in, per-user, no root
+# --------------------------------------------------------------------------- #
+#: Upstream publishes one general-purpose Linux build per architecture,
+#: alongside GPU-vendor-specific variants (rocm, mlx, jetpack...) this project
+#: does not attempt to pick between - the general build already includes CUDA
+#: support, and hardware-specific tuning beyond that is exactly the kind of
+#: judgement call Ollama's *own* installer makes and this one does not try to
+#: second-guess. There is no small or CPU-only option upstream publishes for
+#: x86_64: the smallest general Linux build is itself well over a gigabyte.
+_RELEASES_API = "https://api.github.com/repos/ollama/ollama/releases/latest"
+_LINUX_ASSETS = {
+    "x86_64": "ollama-linux-amd64.tar.zst",
+    "amd64": "ollama-linux-amd64.tar.zst",
+    "aarch64": "ollama-linux-arm64.tar.zst",
+    "arm64": "ollama-linux-arm64.tar.zst",
+}
+
+
+def default_install_dir() -> Path:
+    """Where a copy this project fetched itself would live - never where a
+    system-wide or user-run install puts one; see :func:`find_binary`."""
+    return DATA_DIR / "ollama"
+
+
+def bundled_binary_path() -> Path:
+    return default_install_dir() / "bin" / "ollama"
+
+
+def find_binary() -> Optional[str]:
+    """PATH first, then whatever this project may have installed for itself.
+
+    The precedence matters: a system-wide or user-run install should always
+    win over a private copy this project fetched, the same reasoning
+    :func:`blackvoice.audio.stt.find_whisper_binary` already applies to
+    whisper.cpp - a build the user (or their distribution) chose is trusted
+    ahead of the one shipped here.
+    """
+    found = shutil.which("ollama")
+    if found:
+        return found
+    bundled = bundled_binary_path()
+    return str(bundled) if bundled.exists() else None
+
+
+def _asset_name_for_this_machine() -> str:
+    import platform
+
+    machine = platform.machine().lower()
+    name = _LINUX_ASSETS.get(machine)
+    if not name:
+        raise OllamaError(
+            f"no Ollama build is published for this machine ({machine or 'unknown'})"
+        )
+    return name
+
+
+def _latest_release_asset_url(asset_name: str, timeout: float) -> str:
+    try:
+        import requests
+
+        response = requests.get(
+            _RELEASES_API, timeout=timeout, headers={"User-Agent": "blackvoice"}
+        )
+        response.raise_for_status()
+        assets = response.json().get("assets", [])
+    except Exception as exc:
+        raise OllamaError(f"could not look up the latest Ollama release: {exc}") from exc
+
+    for asset in assets:
+        if asset.get("name") == asset_name:
+            return asset["browser_download_url"]
+    raise OllamaError(f"the latest Ollama release has no {asset_name} asset")
+
+
+def _extract_zst_tar(archive: Path, dest: Path) -> None:
+    """Unpack a .tar.zst - a format Python's stdlib tarfile cannot read.
+
+    Tries GNU tar's own --zstd support first (built in since tar 1.31, which
+    is what every mainstream distribution from the last several years ships),
+    then falls back to piping a standalone zstd binary into tar for anything
+    older. Raising a clear, actionable error when neither is present is the
+    point of trying both before giving up - "install zstd" is something a
+    user can actually act on.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    errors = []
+
+    try:
+        result = subprocess.run(
+            ["tar", "--zstd", "-xf", str(archive), "-C", str(dest)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=180,
+        )
+        if result.returncode == 0:
+            return
+        errors.append(result.stderr.decode("utf-8", "replace").strip())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        errors.append(str(exc))
+
+    if shutil.which("zstd"):
+        try:
+            zstd_proc = subprocess.Popen(
+                ["zstd", "-dc", str(archive)],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            )
+            tar_result = subprocess.run(
+                ["tar", "-x", "-C", str(dest)],
+                stdin=zstd_proc.stdout, stderr=subprocess.PIPE, timeout=180,
+            )
+            zstd_proc.stdout.close()
+            zstd_returncode = zstd_proc.wait(timeout=30)
+            if tar_result.returncode == 0 and zstd_returncode == 0:
+                return
+            errors.append(tar_result.stderr.decode("utf-8", "replace").strip())
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            errors.append(str(exc))
+
+    raise OllamaError(
+        "could not extract the Ollama archive - this needs a tar built with "
+        "zstd support, or a standalone zstd binary (try: sudo apt install "
+        "zstd, or sudo dnf install zstd)" + (f": {errors[-1]}" if errors else "")
+    )
+
+
+def download_and_install(
+    on_progress: Optional[ProgressFn] = None, timeout: float = 30.0
+) -> str:
+    """Fetch Ollama's own release build into a private, per-user directory.
+
+    No root, and no third-party install script executed - a plain archive,
+    streamed and extracted, the same risk shape as every model file this
+    project already fetches for Vosk, whisper.cpp and Piper. What makes this
+    one worth pausing over is size: there is no small build to reach for, so
+    this is a very different amount of bandwidth and disk than any of those -
+    which is exactly why, unlike them, it is opt-in (``ai.auto_install``)
+    rather than on by default.
+
+    Linux only, and only for the two architectures upstream publishes a
+    general build for. Raises :class:`OllamaError` with a message fit to show
+    the user on anything else going wrong; never lets a lower-level exception
+    escape.
+    """
+    if sys.platform != "linux":
+        raise OllamaError("automatic Ollama installation is Linux-only")
+
+    try:
+        import requests
+    except ImportError as exc:
+        raise OllamaError("the requests library is needed to install Ollama") from exc
+
+    asset_name = _asset_name_for_this_machine()
+    url = _latest_release_asset_url(asset_name, timeout=timeout)
+
+    install_dir = default_install_dir()
+    install_dir.mkdir(parents=True, exist_ok=True)
+    archive = install_dir / asset_name
+
+    log.info("downloading %s", asset_name)
+    try:
+        with requests.get(url, stream=True, timeout=timeout) as response:
+            response.raise_for_status()
+            total = int(response.headers.get("content-length", 0))
+            done = 0
+            with archive.open("wb") as handle:
+                for chunk in response.iter_content(chunk_size=1 << 20):
+                    handle.write(chunk)
+                    done += len(chunk)
+                    if on_progress:
+                        on_progress("downloading", done, total)
+    except requests.exceptions.RequestException as exc:
+        archive.unlink(missing_ok=True)
+        raise OllamaError(f"could not download Ollama: {exc}") from exc
+
+    if on_progress:
+        on_progress("extracting", 0, 0)
+    try:
+        _extract_zst_tar(archive, install_dir)
+    finally:
+        archive.unlink(missing_ok=True)
+
+    binary = bundled_binary_path()
+    if not binary.exists():
+        raise OllamaError("the Ollama archive did not contain a bin/ollama binary")
+    binary.chmod(0o755)
+    log.info("installed Ollama to %s", binary)
+    return str(binary)
+
+
+# --------------------------------------------------------------------------- #
+# Running it as a --user systemd service - still no root
+# --------------------------------------------------------------------------- #
+_USER_SERVICE = """[Unit]
+Description=Ollama (installed privately by Black Voice)
+After=network-online.target
+
+[Service]
+ExecStart={binary} serve
+Environment=OLLAMA_MODELS={models_dir}
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+"""
+
+
+def user_service_path() -> Path:
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+    return config_home / "systemd" / "user" / "ollama.service"
+
+
+def write_user_service(binary: str) -> Path:
+    """A --user unit, not a system one: writable and runnable with no root.
+
+    Deliberately named and described as installed "by Black Voice", so
+    anyone who finds it with ``systemctl --user status`` is told where it
+    came from rather than mistaking it for Ollama's own installer having
+    been run.
+    """
+    path = user_service_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        _USER_SERVICE.format(binary=binary, models_dir=default_install_dir() / "models"),
+        encoding="utf-8",
+    )
+    return path
+
+
+def enable_and_start_user_service(timeout: float = 15.0) -> bool:
+    """systemctl --user enable --now, plus a best-effort try at lingering.
+
+    Lingering (``loginctl enable-linger``) is what lets a --user unit keep
+    running without an active login session - the closest a user-level
+    service gets to behaving like a real background service. A user can
+    usually enable it for themselves with no elevated privilege, but not
+    guaranteed to on every distribution's policy, so failure here is not
+    treated as this having failed overall: the unit still runs for the rest
+    of the current login session regardless.
+    """
+    if not shutil.which("systemctl"):
+        return False
+
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "daemon-reload"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout,
+        )
+        result = subprocess.run(
+            ["systemctl", "--user", "enable", "--now", "ollama"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+    if shutil.which("loginctl"):
+        try:
+            import getpass
+
+            subprocess.run(
+                ["loginctl", "enable-linger", getpass.getuser()],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # best-effort only; see the docstring above
+
+    return result.returncode == 0
