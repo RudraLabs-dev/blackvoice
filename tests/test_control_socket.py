@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
+import sys
 import threading
 import time
 
@@ -302,6 +303,74 @@ def test_the_client_is_dropped_from_the_registry_on_disconnect(engine) -> None:
     writer = _FakeWriter()
     _run(server._handle_client(_FakeReader(b'{"id":1,"op":"ping"}\n'), writer))
     assert writer not in server._clients
+
+
+# --------------------------------------------------------------------------- #
+# stop() while a client is still connected - a real loop, no real socket
+# --------------------------------------------------------------------------- #
+# Reproduces, without needing asyncio.start_unix_server at all, the one thing
+# the tests above cannot: a client whose _handle_client task is genuinely
+# suspended - not run to completion by asyncio.run() and gone - at the moment
+# stop() is called. That gap is exactly what let a real bug through: CI caught
+# stop() calling loop.stop() while such a task was still pending, which let it
+# get destroyed by the garbage collector after loop.close() had already run,
+# reaching for that now-gone loop from its own `finally: writer.close()` and
+# logging a real RuntimeError out of a passing test's teardown. This runs on
+# any platform - it needs a bare asyncio loop, nothing Unix-socket-specific -
+# so it is not confined to the Linux-only block below.
+class _HangingReader:
+    """Stands in for a connected client that has not sent anything yet."""
+
+    def __init__(self) -> None:
+        self._never = asyncio.Event()
+
+    async def readline(self) -> bytes:
+        await self._never.wait()  # only resolves via cancellation
+        return b""  # pragma: no cover - unreachable; see above
+
+
+def test_stop_cancels_a_client_still_suspended_on_a_read(engine) -> None:
+    loop = asyncio.new_event_loop()
+
+    def _run_then_close() -> None:
+        # Mirrors ControlServer.start()'s own _thread_main: run_forever()
+        # returns once stop() calls loop.stop(), and close() runs right after
+        # - the same order that let the original bug happen, so the fix is
+        # proven against the real sequence, not a friendlier one.
+        loop.run_forever()
+        loop.close()
+
+    thread = threading.Thread(target=_run_then_close, daemon=True)
+    thread.start()
+
+    server = cs.ControlServer(engine)
+    server._loop = loop
+    writer = _FakeWriter()
+
+    async def _spawn() -> None:
+        loop.create_task(server._handle_client(_HangingReader(), writer))
+
+    asyncio.run_coroutine_threadsafe(_spawn(), loop).result(timeout=2.0)
+    # Give the spawned task one real trip through the loop to reach
+    # "await self._never.wait()" and register itself, so stop() below is
+    # actually cancelling a suspended task rather than one that never started.
+    asyncio.run_coroutine_threadsafe(asyncio.sleep(0), loop).result(timeout=2.0)
+    assert len(server._tasks) == 1
+
+    unraisable = []
+    old_hook = sys.unraisablehook
+    sys.unraisablehook = lambda ua: unraisable.append(ua)
+    try:
+        server.stop()
+        thread.join(timeout=3.0)
+    finally:
+        sys.unraisablehook = old_hook
+
+    assert unraisable == []  # the exact symptom CI caught: none, this time
+    assert writer.closed
+    assert server._tasks == set()
+    assert not thread.is_alive()
+    assert loop.is_closed()
 
 
 # --------------------------------------------------------------------------- #

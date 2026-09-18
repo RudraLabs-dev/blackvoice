@@ -165,6 +165,7 @@ class ControlServer:
         self._thread: Optional[threading.Thread] = None
         self._server: Optional[asyncio.AbstractServer] = None
         self._clients: Set[asyncio.StreamWriter] = set()
+        self._tasks: Set[asyncio.Task] = set()
         self._unsubscribe: list = []
         self._path: Optional[str] = None
 
@@ -218,15 +219,37 @@ class ControlServer:
             return
         loop, self._loop = self._loop, None
 
-        def _shutdown() -> None:
+        async def _shutdown() -> None:
             if self._server is not None:
                 self._server.close()
+                await self._server.wait_closed()
             for unsub in self._unsubscribe:
                 unsub()
             self._unsubscribe.clear()
+
+            # Cancel every connected client's handler and wait for it to
+            # actually unwind before the loop underneath it goes away. A
+            # bare loop.stop() here does not do that: run_forever() returns
+            # with those tasks still suspended at "await reader.readline()",
+            # loop.close() runs right after, and only later - whenever the
+            # garbage collector gets around to destroying the now-orphaned
+            # coroutine - does its `finally: writer.close()` run, reaching
+            # for a loop that is no longer there. That is not hypothetical:
+            # it is exactly what CI caught, as a real RuntimeError logged out
+            # of a test's teardown once a client happened to still be
+            # connected when stop() ran.
+            tasks = list(self._tasks)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
             loop.stop()
 
-        loop.call_soon_threadsafe(_shutdown)
+        # run_coroutine_threadsafe, not call_soon_threadsafe: shutdown needs
+        # to await the cancelled tasks finishing, and only a coroutine can do
+        # that - a plain callback cannot suspend itself to wait for anything.
+        asyncio.run_coroutine_threadsafe(_shutdown(), loop)
         if self._thread is not None:
             self._thread.join(timeout=3.0)
         self._server = None
@@ -281,6 +304,12 @@ class ControlServer:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         self._clients.add(writer)
+        # Tracked so stop() can cancel and await this task itself, rather than
+        # letting it be torn down by the garbage collector after the loop it
+        # would need to close on has already gone - see stop()'s docstring.
+        task = asyncio.current_task()
+        if task is not None:
+            self._tasks.add(task)
         try:
             while True:
                 try:
@@ -294,7 +323,15 @@ class ControlServer:
                     continue
                 await self._dispatch(raw, writer)
         finally:
+            # Also reached via asyncio.CancelledError, from stop() cancelling
+            # this task - deliberately not caught above. finally still runs,
+            # the writer still gets closed, and letting CancelledError keep
+            # propagating afterwards is the correct, expected behaviour: it
+            # is what tells the gather() awaiting this task that the task was
+            # actually cancelled rather than that it happened to finish.
             self._clients.discard(writer)
+            if task is not None:
+                self._tasks.discard(task)
             writer.close()
 
     async def _dispatch(self, raw: bytes, writer: asyncio.StreamWriter) -> None:
