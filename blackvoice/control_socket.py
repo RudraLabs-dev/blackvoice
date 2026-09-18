@@ -444,7 +444,7 @@ async def _op_list_ollama_models(server: ControlServer, params: Dict[str, Any]) 
                 "ram_gb": model.ram_gb,
                 "note": model.note,
                 "recommended": model.name == ollama_models.RECOMMENDED,
-                "pulled": None if pulled is None else model.name in pulled,
+                "pulled": None if pulled is None else ollama_models.has_model(pulled, model.name),
             }
         )
     return {"models": models, "reachable": pulled is not None}

@@ -329,12 +329,13 @@ def _setup_ollama(args: argparse.Namespace) -> int:
               f"{'' if reachable else ' - ' + ollama_models.not_running_message()}")
         print(f"\nCurrently configured: {config.ai.ollama_model}")
         if pulled is not None:
-            have = OK if config.ai.ollama_model in pulled else DOT
-            print(f"  {have} {'already pulled' if config.ai.ollama_model in pulled else 'not pulled yet'}")
+            already_have = ollama_models.has_model(pulled, config.ai.ollama_model)
+            have = OK if already_have else DOT
+            print(f"  {have} {'already pulled' if already_have else 'not pulled yet'}")
 
         print("\nLightweight models you can pull:")
         for name in ollama_models.LIGHTWEIGHT_MODELS:
-            mark = OK if pulled and name in pulled else DOT
+            mark = OK if pulled and ollama_models.has_model(pulled, name) else DOT
             star = " (recommended)" if name == ollama_models.RECOMMENDED else ""
             print(f"  {mark} {name:<16} {ollama_models.describe(name)}{star}")
         print("\nPull one with: blackvoice setup --ollama --model <name>")
@@ -653,7 +654,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 problems.append("ollama serve")
             else:
                 pulled = ollama_models.pulled_models(config.ai.ollama_url) or []
-                have = config.ai.ollama_model in pulled
+                have = ollama_models.has_model(pulled, config.ai.ollama_model)
                 print(f"  {OK if have else BAD} model {config.ai.ollama_model!r} "
                       f"{'is pulled' if have else 'is not pulled yet'}")
                 if not have:

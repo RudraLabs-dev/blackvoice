@@ -277,7 +277,7 @@ class Engine:
     def _pull_ollama_model_if_needed(self, ollama_models, url: str) -> None:
         model = self.config.ai.ollama_model
         pulled = ollama_models.pulled_models(url)
-        if pulled is not None and model in pulled:
+        if pulled is not None and ollama_models.has_model(pulled, model):
             return
 
         self.bus.publish(

@@ -111,6 +111,27 @@ def test_does_not_pull_a_model_that_is_already_there(engine, monkeypatch) -> Non
     assert pulled == []
 
 
+def test_does_not_re_pull_a_model_ollama_reports_with_its_tag(engine, monkeypatch) -> None:
+    """The bug found on a real machine: /api/tags answers "llama3.2:latest",
+    ai.ollama_model only ever stores the bare "llama3.2", and the old exact
+    `model in pulled` check never matched the two - so a model that had
+    genuinely already been pulled kept being re-fetched, and reported as
+    missing, on every single run. The test above used an unrealistically bare
+    name in its own mock and passed either way, which is exactly why this
+    needs its own case with what Ollama's API actually returns.
+    """
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/ollama")
+    monkeypatch.setattr(om, "is_reachable", lambda *a, **k: True)
+    assert engine.config.ai.ollama_model == "llama3.2"
+    monkeypatch.setattr(om, "pulled_models", lambda *a, **k: ["llama3.2:latest"])
+    pulled = []
+    monkeypatch.setattr(om, "pull", lambda name, url, on_progress=None: pulled.append(name))
+
+    engine.ensure_ai_backend()
+
+    assert pulled == []
+
+
 def test_pulls_when_the_server_answers_but_the_model_list_is_unknown(engine, monkeypatch) -> None:
     """pulled_models() returning None means "could not ask" - try the pull anyway."""
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/ollama")

@@ -109,6 +109,28 @@ def pulled_models(url: str, timeout: float = 5.0) -> Optional[List[str]]:
         return None
 
 
+def _with_latest_tag(name: str) -> str:
+    """Ollama treats a bare name as implicitly ':latest' - match that."""
+    return name if ":" in name else f"{name}:latest"
+
+
+def has_model(pulled: List[str], name: str) -> bool:
+    """True when ``name`` (bare or already tagged) is in ``pulled``.
+
+    /api/tags always answers with the fully tagged name - "llama3.2:latest" -
+    while every config field, CLI flag and curated-list entry in this project
+    only ever names the bare model, since that is what `ollama pull` and
+    `ollama run` both also accept. A plain ``name in pulled`` therefore never
+    matches, ever, for any model that has not been given an explicit non-
+    default tag by hand: a model that is unmistakably already pulled is
+    reported as missing, permanently, and ensure_ai_backend() re-triggers the
+    "fetching a model" message and a redundant pull on every single run
+    because of it - which is the exact, reproducible bug this function
+    replaces every bare `in` check for.
+    """
+    return _with_latest_tag(name) in pulled or name in pulled
+
+
 def not_running_message() -> str:
     """The same install-vs-start distinction :class:`AISkill` gives at answer time.
 

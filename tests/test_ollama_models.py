@@ -89,6 +89,36 @@ def test_not_running_message_distinguishes_missing_from_stopped(monkeypatch) -> 
 
 
 # --------------------------------------------------------------------------- #
+# has_model - matching a bare config name against Ollama's tagged results
+# --------------------------------------------------------------------------- #
+# The bug this exists to close, found on a real machine after the model had
+# genuinely been pulled: /api/tags always answers with the full tagged name -
+# "llama3.2:latest" - while ai.ollama_model, every curated-list entry and
+# every CLI --model flag in this project only ever store the bare name, since
+# that is what `ollama pull` itself accepts. A plain `name in pulled` never
+# matches a bare name against a tagged one, so a model that was unmistakably
+# already there kept being reported as missing on every single run.
+def test_has_model_matches_a_bare_name_against_the_implicit_latest_tag() -> None:
+    assert om.has_model(["llama3.2:latest"], "llama3.2") is True
+
+
+def test_has_model_matches_when_both_sides_already_carry_a_tag() -> None:
+    assert om.has_model(["llama3.2:1b"], "llama3.2:1b") is True
+
+
+def test_has_model_does_not_match_a_different_tag_of_the_same_model() -> None:
+    assert om.has_model(["llama3.2:1b"], "llama3.2:70b") is False
+
+
+def test_has_model_false_for_a_model_that_really_is_not_there() -> None:
+    assert om.has_model(["qwen2.5:1.5b"], "mistral") is False
+
+
+def test_has_model_of_an_empty_list_is_false() -> None:
+    assert om.has_model([], "llama3.2") is False
+
+
+# --------------------------------------------------------------------------- #
 # pulling
 # --------------------------------------------------------------------------- #
 class _FakeStreamingResponse:
