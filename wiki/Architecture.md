@@ -5,7 +5,7 @@ How a spoken sentence becomes an action.
 ```mermaid
 flowchart LR
     MIC[Microphone<br/>sounddevice] --> WAKE[Wake word<br/>Vosk grammar]
-    WAKE -->|heard 'black'| STT[Hybrid STT]
+    WAKE -->|heard 'black'| STT[Hybrid STT<br/>whisper.cpp, then Vosk]
     STT --> ROUTER[Router<br/>42 regex rules]
     ROUTER --> SKILL[Skill]
     SKILL --> TTS[Speaker<br/>piper / espeak-ng]
@@ -14,10 +14,12 @@ flowchart LR
     ROUTER -.-> BUS
     SKILL -.-> BUS
     BUS -.-> UI[Tray icon<br/>+ overlay]
+    BUS -.-> CTRL[Control socket<br/>for other frontends]
 ```
 
 Solid arrows are the data path. Dotted arrows are events — the UI never touches
-the audio layer directly, it only subscribes.
+the audio layer directly, it only subscribes, and neither does anything outside
+the process: that is what the control socket is for.
 
 ## The layers
 
@@ -65,26 +67,46 @@ identically when only the cloud path exists.
 
 ## Hybrid recognition
 
+Three tiers, tried in order, each one only reached when the one before it did
+not answer:
+
 ```mermaid
 flowchart TD
-    A[Audio buffer] --> B{mode}
-    B -->|offline| C[Vosk only]
-    B -->|online| D[Cloud only]
-    B -->|hybrid| E[Vosk first]
-    E --> F{confident enough?}
-    F -->|yes| G[Use it]
-    F -->|no| H{online?}
-    H -->|yes| D
-    H -->|no| G
+    A[Audio buffer] --> W{whisper.cpp<br/>installed and allowed?}
+    W -->|yes| WR[Transcribe with whisper.cpp]
+    WR -->|got text| DONE[Use it]
+    WR -->|nothing| V
+    W -->|no| V{Vosk - en + hi race<br/>on the same buffer}
+    V --> C{confident enough?<br/>hybrid mode only}
+    C -->|yes| DONE
+    C -->|no| O{online?}
+    O -->|yes| CLOUD[Cloud recogniser]
+    O -->|no| DONE
 ```
 
-With `language: "both"`, the English and Hindi models each transcribe the **same
-buffer** and the higher average word confidence wins. That is the whole trick
-behind Hinglish: rather than detecting the language first, both are tried and the
-one that fits better is kept.
+**Why not just let Vosk's two models race, always?** A Vosk model can only
+emit words from its own lexicon. On *"firefox kholo"* the English model has no
+`kholo` and the Hindi model has no `firefox` — neither can produce the whole
+sentence, and taking the more confident of two wrong halves is not a repair.
+Their confidence scores are not even on the same scale to compare, coming from
+different acoustic models over different lexicons. whisper.cpp has one
+vocabulary covering both scripts, so it either gets the sentence or it does
+not, and that answer is taken as it stands rather than raced against anything.
 
-Connectivity is probed with a 1-second TCP connect to `8.8.8.8:53`, cached for 20
-seconds so it is not repeated per utterance.
+**Why is Vosk still here, then?** Two reasons: it is the fallback for a
+machine that has not installed whisper.cpp (`speech.engine: "auto"`, the
+default, degrades to it silently — see [Configuration → speech](Configuration#speech--recognition)),
+and it is what streams, which is why it alone does wake-word detection. With
+`language: "both"` the English and Hindi models each transcribe the same
+buffer and the higher average word confidence wins, same as before whisper.cpp
+existed — just now the second choice rather than the first.
+
+Connectivity, for the cloud tier, is probed with a 1-second TCP connect to
+`8.8.8.8:53`, cached for 20 seconds so it is not repeated per utterance.
+
+**How well any of this actually works on your voice** is not something to
+guess at: `blackvoice eval record` / `blackvoice eval run` measure it — see
+[Configuration → speech](Configuration#speech--recognition).
 
 ## Intent routing
 
@@ -163,11 +185,16 @@ configuration.
 | main | Qt event loop, tray icon, overlay |
 | `engine` | Audio loop, recognition, skill dispatch |
 | `tts` | Speech output queue |
+| `control` | The control socket's own `asyncio` event loop |
 | timers | One short-lived thread per timer or reminder |
 
 The UI must only be touched from the Qt thread, so the engine publishes to the
 event bus and `BusBridge` re-emits each event as a Qt signal with
-`QueuedConnection`. That hop is what makes it safe.
+`QueuedConnection`. That hop is what makes it safe. The control socket
+subscribes to the same bus from its own thread and hops onto its `asyncio`
+loop with `call_soon_threadsafe` before writing to any connected client —
+the same problem as `BusBridge`, solved the way `asyncio` solves it rather
+than the way Qt does.
 
 `Speaker.say()` returns immediately and queues; `stop()` kills the current
 utterance mid-word.
@@ -178,25 +205,74 @@ Every optional dependency is imported lazily and its absence is handled:
 
 | Missing | Result |
 |---|---|
-| `vosk` or models | No offline recognition; hybrid mode falls back to the cloud |
+| whisper.cpp binary or model | `speech.engine: "auto"` silently uses Vosk instead |
+| `vosk` or its models | No offline fallback tier; `hybrid` mode leans on whisper.cpp or the cloud |
 | `PyQt6` | Falls back to headless mode with a message |
 | `sounddevice` / PortAudio | Clear error naming the package to install |
 | `speech_recognition` | No cloud fallback; offline still works |
 | espeak-ng and friends | Replies are printed instead of spoken |
 | `psutil` | Battery and system-info commands report why |
+| No Unix domain sockets (not Linux) | The control socket is simply not opened |
 
 `blackvoice doctor` reports all of this in one place.
+
+## External frontends
+
+The tray and overlay call straight into `Engine` because they share its
+address space — a normal Python function call, no serialisation. Anything
+that does not run in this process cannot do that, and needs a channel across
+the process boundary instead.
+
+`control_socket.py` is that channel: a Unix domain socket at
+`$XDG_RUNTIME_DIR/blackvoice/control.sock`, one JSON object per line each way.
+A request carries `id` and `op`; the reply echoes `id` back with either
+`{"ok": true, "result": ...}` or `{"ok": false, "error": "..."}`. Frames with
+no `id` but an `"event"` key instead are pushed unprompted whenever the
+engine's own bus fires — `state`, `heard`, `reply`, `confirm`.
+
+```
+{"id": 1, "op": "get_state"}                                     →
+{"id": 1, "ok": true, "result": {"state": "idle"}}
+
+{"id": 2, "op": "set_config",
+ "params": {"path": "ai.ollama_model", "value": "qwen2.5:1.5b"}}  →
+{"id": 2, "ok": true, "result": {"path": "ai.ollama_model",
+                                  "value": "qwen2.5:1.5b"}}
+```
+
+A handful of operations exist so far — `get_config`, `set_config`,
+`get_schema`, `submit_text`, `list_ollama_models`, `pull_ollama_model` —
+chosen to prove the architecture and answer one screen's worth of settings,
+not as a general remote-control surface. Two decisions are worth knowing
+before extending it, both explained at length in the module's own docstring:
+a socket file rather than a TCP port, because the filesystem's permissions on
+it *are* the access control with no token to manage; and hand-rolled JSON
+lines rather than `websockets` or `aiohttp`, because both ship a wheel per
+CPython version and everything bundled into `/opt/blackvoice/lib` has to be
+`py3-none` or `abi3` — the same constraint that keeps whisper.cpp a
+subprocess rather than a Python binding.
+
+`flutter_app/` in the repository is the first thing speaking this protocol —
+a settings screen for the Ollama model picker and a plain window for typed
+commands. It was written without a Flutter SDK available to build it, so
+treat it as an unverified draft of the client side of this protocol, not as a
+working app yet; its own README says exactly what has and has not been
+checked.
 
 ## Source layout
 
 ```
 blackvoice/
-├── app.py            engine: audio loop, state machine, confirmations
-├── cli.py            run · text · setup · doctor · devices · say · config
-├── config.py         dataclass config + environment overrides
+├── app.py             engine: audio loop, state machine, confirmations
+├── cli.py             run · text · setup · eval · doctor · devices · say · config
+├── config.py          dataclass config + environment overrides
+├── control_socket.py  the local control socket for external frontends
+├── evaluate.py        the accuracy harness: `blackvoice eval`
+├── models.py          Vosk + whisper.cpp model download
+├── ollama_models.py   the curated lightweight-model list
 ├── audio/
 │   ├── mic.py        microphone stream, RMS metering
-│   ├── stt.py        hybrid recognition
+│   ├── stt.py        hybrid recognition: whisper.cpp, then Vosk
 │   ├── tts.py        speech output
 │   └── wake.py       wake-word detection
 ├── nlu/
@@ -209,15 +285,19 @@ blackvoice/
 │   ├── terminal.py   guarded shell access
 │   ├── ai.py         Ollama / Claude / OpenAI
 │   ├── utils.py      clock, weather, timers, notes, media, maths
-│   └── control.py    help, cancel, sleep, yes/no
+│   └── control.py    help, cancel, sleep, yes/no — a skill, not the socket above
 ├── ui/
 │   ├── tray.py       tray icon, menu, bus bridge
 │   ├── overlay.py    popup card and waveform
+│   ├── settings.py   the settings window, generated from Config
 │   └── icons.py      the logo, painted with QPainter
 └── core/
     ├── bus.py        publish/subscribe
     ├── logs.py       console + rotating file
     └── safety.py     shell guard
+
+flutter_app/           an early, unverified Flutter frontend over the control
+                        socket — see its own README before assuming it builds
 ```
 
 ## Next
