@@ -241,7 +241,10 @@ def _setup_whisper(args: argparse.Namespace) -> int:
         print(f"{OK} whisper.cpp  {binary}")
     else:
         print(f"{BAD} whisper.cpp was not found on this system")
-        print("  It is a native binary, not a Python package.")
+        print("  It is a native binary, not a Python package. The .deb and")
+        print("  .rpm packages already bundle it - this only happens on the")
+        print("  tarball/install.sh route, or if speech.whisper_binary points")
+        print("  somewhere empty.")
         print()
         print("  Debian sid/forky package it directly:")
         print("    sudo apt install whisper.cpp")

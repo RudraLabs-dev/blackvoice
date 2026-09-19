@@ -80,6 +80,7 @@ echo "==> Black Voice $VERSION  ($TYPE)"
 echo "==> staging"
 rm -rf "$STAGE"
 mkdir -p "$LIB" \
+         "$STAGE$PREFIX/bin" \
          "$STAGE/usr/bin" \
          "$STAGE/usr/share/applications" \
          "$STAGE/usr/share/icons/hicolor/scalable/apps" \
@@ -141,6 +142,50 @@ if ! PYTHONPATH="$LIB" python3 -c "import vosk" 2>/tmp/vosk-import-error; then
     exit 1
 fi
 rm -f /tmp/vosk-import-error
+
+# --------------------------------------------------------------- whisper.cpp
+# whisper.cpp is the more accurate offline recognition tier (see
+# audio/stt.py), but unlike vosk it has no PyPI wheel and no distribution
+# packages it either - and unlike Piper, its stable (non-prerelease) GitHub
+# releases carry no binary asset to fetch, only source. Built here instead,
+# once, at package-build time, and bundled at $PREFIX/bin - exactly where
+# blackvoice/config.py's BUNDLED_BIN_DIR and audio/stt.py's
+# find_whisper_binary() already look, so no code change was needed to wire
+# this up once it actually exists.
+#
+# Pinned to a tagged release rather than a moving branch, so a package built
+# today and one built next month are reproducible from the same inputs.
+# Bump WHISPER_VERSION deliberately, the same way an upstream Python
+# dependency would get a version bump, rather than silently floating.
+#
+# CPU only (GGML_NATIVE=OFF: portable across the machine that builds the
+# package and the one that runs it, not tuned to either), statically linked
+# (BUILD_SHARED_LIBS=OFF: one self-contained binary, confirmed by `ldd` to
+# depend on nothing beyond libstdc++/libgomp/libc - every real desktop
+# already has those - so there is no second bundled-libs directory to keep
+# in sync the way Piper's espeak-ng-data is).
+WHISPER_VERSION="v1.9.4"
+WHISPER_SRC="$ROOT/build/whisper.cpp-src"
+WHISPER_BUILD="$ROOT/build/whisper.cpp-build"
+
+echo "==> building whisper.cpp $WHISPER_VERSION (CPU only, static)"
+if [ ! -d "$WHISPER_SRC/.git" ]; then
+    git clone --quiet --depth 1 --branch "$WHISPER_VERSION" \
+        https://github.com/ggml-org/whisper.cpp "$WHISPER_SRC"
+fi
+cmake -S "$WHISPER_SRC" -B "$WHISPER_BUILD" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DGGML_NATIVE=OFF \
+    > /dev/null
+cmake --build "$WHISPER_BUILD" --config Release -j "$(nproc)" --target whisper-cli > /dev/null
+
+[ -x "$WHISPER_BUILD/bin/whisper-cli" ] || {
+    echo "whisper.cpp build did not produce bin/whisper-cli" >&2
+    exit 1
+}
+install -m 0755 "$WHISPER_BUILD/bin/whisper-cli" "$STAGE$PREFIX/bin/whisper-cli"
+echo "    $(du -h "$STAGE$PREFIX/bin/whisper-cli" | cut -f1)  whisper-cli"
 
 # ------------------------------------------------------------------- files
 install -m 0755 "$ROOT/packaging/blackvoice-launcher.sh" "$STAGE/usr/bin/blackvoice"

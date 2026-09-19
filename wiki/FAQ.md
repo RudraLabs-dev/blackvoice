@@ -31,17 +31,22 @@ restricted Vosk grammar — deciding only between the wake phrases and
 `[unk]` — is exactly that.
 
 **Transcribing the command itself** is a different job with a different best
-tool. `blackvoice setup --whisper` fetches a small
-[whisper.cpp](https://github.com/ggml-org/whisper.cpp) model; once it is
-there, `speech.engine: "auto"` (the default) uses it to transcribe whatever
-was said between the wake word and the silence that ends the utterance,
-because it is simply more accurate than Vosk, with Vosk kept as the fallback
-when whisper.cpp is not installed or fails. It is a native binary run as a
+tool. The `.deb` and `.rpm` packages already bundle the
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp) binary itself (built
+from a pinned source release at package-build time, since whisper.cpp's own
+stable GitHub releases ship no binary to fetch); `blackvoice setup --whisper`
+fetches the small GGML model it needs on top of that. Once both are there,
+`speech.engine: "auto"` (the default) uses it to transcribe whatever was said
+between the wake word and the silence that ends the utterance, because it is
+simply more accurate than Vosk, with Vosk kept as the fallback when
+whisper.cpp is not installed or fails. It is a native binary run as a
 subprocess, the same arrangement Piper already uses for speech output, rather
 than a Python package — the libraries a Python Whisper binding would need
 (`ctranslate2`, `onnxruntime`) ship one build per Python version, which does
 not survive a distribution upgrading its system Python the way the
-`.deb`/`.rpm` packages need to.
+`.deb`/`.rpm` packages need to. Installed from source instead (`install.sh`,
+no `.deb`/`.rpm`)? Nothing bundles the binary for you there - see
+[Installation](Installation) for the manual build.
 
 So: Vosk for streaming keyword-spotting, whisper.cpp for one-shot
 transcription of what was actually said. Using Vosk for both was the earlier

@@ -160,7 +160,7 @@ jobs:
           # install would ever resemble.
           apt-get install -y -qq --no-install-recommends \
             git python3 python3-venv python3-pip \
-            ruby ruby-dev build-essential rpm \
+            ruby ruby-dev build-essential cmake rpm \
             portaudio19-dev libasound2-dev \
             python3-requests python3-numpy python3-cffi > /dev/null
           gem install --no-document fpm > /dev/null
@@ -180,6 +180,15 @@ jobs:
           dpkg-deb --info "$DEB"
           echo "--- contents (top level) ---"
           dpkg-deb --contents "$DEB" | awk '{print $6}' | cut -d/ -f1-3 | sort -u | head -20
+
+      - name: whisper-cli actually runs, not just exists in the archive
+        run: |
+          # The same lesson the vosk import check inside build-package.sh
+          # already learned the hard way: a file being present in the
+          # package is not the same as it working once extracted for real.
+          rm -rf /tmp/deb-extract
+          dpkg-deb -x dist/*.deb /tmp/deb-extract
+          /tmp/deb-extract/opt/blackvoice/bin/whisper-cli --help | head -5
 
       - uses: actions/upload-artifact@v4
         with:
@@ -202,7 +211,7 @@ jobs:
           # is the same assumption the .rpm itself already makes.
           dnf install -y -q \
             git python3 python3-pip \
-            ruby ruby-devel gcc make redhat-rpm-config rpm-build \
+            ruby ruby-devel gcc gcc-c++ make cmake redhat-rpm-config rpm-build \
             portaudio-devel alsa-lib-devel \
             python3-requests python3-numpy python3-cffi > /dev/null
           gem install --no-document fpm > /dev/null
@@ -222,6 +231,12 @@ jobs:
           rpm -qip "$RPM"
           echo "--- contents (top level) ---"
           rpm -qlp "$RPM" | cut -d/ -f1-3 | sort -u | head -20
+
+      - name: whisper-cli actually runs, not just exists in the archive
+        run: |
+          rm -rf /tmp/rpm-extract && mkdir -p /tmp/rpm-extract
+          cd /tmp/rpm-extract && rpm2cpio "$OLDPWD"/dist/*.rpm | cpio -idm --quiet
+          /tmp/rpm-extract/opt/blackvoice/bin/whisper-cli --help | head -5
 
       - uses: actions/upload-artifact@v4
         with:
@@ -302,9 +317,9 @@ jobs:
           ./install.sh --system
           \`\`\`
 
-          On its first run Black Voice downloads the offline speech models
-          (~90 MB) into your home directory - they are per-user, so a package
-          cannot install them for you.
+          On its first run Black Voice downloads the offline speech model
+          (~40 MB) into your home directory - it is per-user, so a package
+          cannot install it for you.
 
           \`\`\`bash
           blackvoice doctor    # optional: check what is installed
@@ -316,7 +331,10 @@ jobs:
           packages your distribution already provides. Only the four libraries
           no distribution ships - vosk, sounddevice, SpeechRecognition and
           pyttsx3 - are bundled, and none of them is tied to a Python version,
-          so one build works everywhere.
+          so one build works everywhere. The packages also bundle a
+          whisper.cpp binary, built from source at release time, for more
+          accurate offline recognition than Vosk alone - fetch its model with
+          \`blackvoice setup --whisper\` to use it.
 
           ### Verify your download
 
