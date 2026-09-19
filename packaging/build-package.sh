@@ -174,7 +174,7 @@ cat <<'MSG'
     blackvoice           start it
     blackvoice doctor    check the installation
 
-  On its first run it downloads the offline speech models (~90 MB) into
+  On its first run it downloads the offline speech model (~40 MB) into
   your home directory. Models are per-user, so this cannot happen here.
 
   Voice commands all work as they are. Answering open questions needs a
@@ -219,7 +219,7 @@ FPM_COMMON=(
     --maintainer "Rudra Labs <connect@rudralabs.dev>"
     --url "https://github.com/RudraLabs-dev/blackvoice"
     --description "Offline-first voice assistant for Linux
-Black Voice controls your desktop by voice in Hindi, English and Hinglish.
+Black Voice controls your desktop by voice, in English.
 Speech recognition runs locally, so it works without a network connection.
 Applications, volume, brightness, files, timers and guarded shell access,
 plus question answering through a local or hosted language model."
