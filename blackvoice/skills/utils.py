@@ -17,9 +17,9 @@ from .base import Reply, Skill, SkillContext
 log = logging.getLogger(__name__)
 
 _UNIT_SECONDS = {
-    "sec": 1, "second": 1, "seconds": 1, "सेकंड": 1,
-    "min": 60, "minute": 60, "minutes": 60, "मिनट": 60,
-    "hr": 3600, "hour": 3600, "hours": 3600, "घंटा": 3600,
+    "sec": 1, "second": 1, "seconds": 1,
+    "min": 60, "minute": 60, "minutes": 60,
+    "hr": 3600, "hour": 3600, "hours": 3600,
 }
 
 #: playerctl / XF86 key name for each media action

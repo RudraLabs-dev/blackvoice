@@ -1,15 +1,4 @@
-"""_looks_hindi: which voice speaks a reply.
-
-Devanagari is unambiguous. Romanised Hindi is not - "hai", "kya" and "kar"
-are also just English-looking tokens with nothing in the script to tell them
-apart - and AISkill's own system prompt asks it to answer "in the same
-Hinglish mixture when that is how the question came," so a real reply very
-often carries no Devanagari at all. Missing that sent every such reply to the
-English voice, which guesses English pronunciations for Hindi words it was
-never trained on - reported from a real machine as the TTS output sounding
-"robotic" despite Piper - a natural-sounding neural voice - being the engine
-actually speaking it.
-"""
+"""Text-to-speech engine selection and the Piper subprocess wiring."""
 
 from __future__ import annotations
 
@@ -17,7 +6,7 @@ import pytest
 
 from blackvoice import piper_install
 from blackvoice.audio import tts as tts_mod
-from blackvoice.audio.tts import Speaker, _looks_hindi, detect_engine
+from blackvoice.audio.tts import Speaker, detect_engine
 from blackvoice.config import VoiceConfig
 
 
@@ -79,7 +68,7 @@ def piper_speaker(monkeypatch):
     monkeypatch.setattr(piper_install, "espeak_data_dir", lambda: None)
 
     speaker = Speaker(VoiceConfig(engine="piper"))
-    monkeypatch.setattr(speaker, "_piper_voice_for", lambda hindi: "/voices/en_US.onnx")
+    monkeypatch.setattr(speaker, "_piper_voice_for", lambda: "/voices/en_US.onnx")
 
     calls = []
     monkeypatch.setattr(
@@ -115,119 +104,36 @@ def test_espeak_data_is_passed_when_available(monkeypatch, piper_speaker) -> Non
 
 
 # --------------------------------------------------------------------------- #
-# Devanagari - the unambiguous case, unaffected by any of this
+# _piper_voice_for: always the configured English voice
 # --------------------------------------------------------------------------- #
-def test_devanagari_is_always_hindi() -> None:
-    assert _looks_hindi("आवाज़ अच्छी नहीं है") is True
-    assert _looks_hindi("खोलो") is True
+def test_piper_voice_for_uses_the_configured_english_voice(monkeypatch) -> None:
+    speaker = Speaker(VoiceConfig(engine="none"))
+    monkeypatch.setattr("blackvoice.voices.installed", lambda name: True)
+    monkeypatch.setattr(
+        "blackvoice.voices.voice_path", lambda name: __import__("pathlib").Path(f"/voices/{name}.onnx")
+    )
+    assert speaker._piper_voice_for() == f"/voices/{speaker.cfg.piper_voice_en}.onnx"
+    speaker.shutdown()
 
 
-def test_empty_text_is_not_hindi() -> None:
-    assert _looks_hindi("") is False
-
-
-# --------------------------------------------------------------------------- #
-# romanised Hindi / Hinglish - the case this exists to catch
-# --------------------------------------------------------------------------- #
-@pytest.mark.parametrize(
-    "text",
-    [
-        "yeh ek test hai natural voice ka",
-        "aap kaise hain",
-        "main theek hoon",
-        "volume 40 kar do",
-        "band karo",
-        "haan bilkul",
-        "nahi, aisa nahi hai",
-        "aapka din kaisa raha",
-        "firefox kholo",
-        "kya haal hai",
-        "wifi band karo",
-        "screenshot le lo",
-    ],
-)
-def test_romanised_hindi_is_recognised(text: str) -> None:
-    assert _looks_hindi(text) is True
+def test_piper_voice_for_prefers_an_explicit_model_path() -> None:
+    speaker = Speaker(VoiceConfig(engine="none", piper_model="/custom/voice.onnx"))
+    assert speaker._piper_voice_for() == "/custom/voice.onnx"
+    speaker.shutdown()
 
 
 # --------------------------------------------------------------------------- #
-# ordinary English - real reply strings actually spoken by this codebase,
-# pulled from the skills modules, so this is not a hypothetical battery
+# _speak_espeak: always the configured English voice id
 # --------------------------------------------------------------------------- #
-_REAL_ENGLISH_REPLIES = [
-    "I am not able to answer that one.",
-    "I can control apps, volume, files, the terminal and answer questions.",
-    "I can only set reminders up to twenty four hours ahead.",
-    "I cannot divide by zero.",
-    "I could not change the Bluetooth state.",
-    "I could not change the Wi-Fi state. Is NetworkManager installed?",
-    "I could not fetch the weather right now.",
-    "I could not find a browser to open.",
-    "I could not find a file manager to open that with.",
-    "I could not find a screen locker.",
-    "I could not open the browser.",
-    "I could not parse that command safely.",
-    "I could not reach the AI backend.",
-    "I could not work that out.",
-    "I did not catch the brightness level.",
-    "I did not catch the question.",
-    "I did not understand that, and the AI backend is switched off.",
-    "I do not know how to do that yet.",
-    "I do not know that command.",
-    "Install playerctl so I can control media playback.",
-    "Locking the screen.",
-    "No media player is running.",
-    "No screenshot tool found. Install gnome-screenshot, grim or scrot.",
-    "No volume control tool found.",
-    "Power actions always ask first - a misheard word here is expensive.",
-    "Screenshot saved to your Pictures folder.",
-    "Something went wrong while doing that.",
-    "That command failed.",
-    "That feature is not available right now.",
-    "That name has no characters I can use for a folder.",
-    "The AI backend is rate limiting me. Try again shortly.",
-    "The AI backend returned an empty answer.",
-    "The AI backend took too long to answer.",
-    "The full list is on screen.",
-    "The requests library is not installed.",
-    "The weather service did not respond in time.",
-    "The weather service sent something I could not read.",
-    "There is nothing waiting for a yes.",
-    "This machine has no battery - it looks like a desktop.",
-    "Toggled playback.",
-    "Going to sleep. Say Black to wake me.",
-    "Volume set to 40 percent.",
-    "Opening firefox.",
-    "What is the weather like today?",
-    "Set a timer for five minutes.",
-]
+def test_speak_espeak_uses_the_english_voice(monkeypatch) -> None:
+    speaker = Speaker(VoiceConfig(engine="none"))
+    calls = []
+    monkeypatch.setattr(speaker, "_run_proc", lambda argv, stdin_text=None: calls.append(argv))
+    monkeypatch.setattr(tts_mod, "_which", lambda name: "/usr/bin/espeak-ng" if "espeak" in name else None)
 
+    speaker._speak_espeak("hello")
 
-@pytest.mark.parametrize("text", _REAL_ENGLISH_REPLIES)
-def test_real_english_replies_are_not_flagged_as_hindi(text: str) -> None:
-    assert _looks_hindi(text) is False
-
-
-# --------------------------------------------------------------------------- #
-# the specific collision that caught the fix in review: "the" is a real
-# romanised Hindi word (the plural past-tense "the", as in "ve gaye the") and
-# also the single most common word in English - keeping it in the list broke
-# ordinary English on contact.
-# --------------------------------------------------------------------------- #
-def test_the_is_not_treated_as_a_hindi_word() -> None:
-    assert _looks_hindi("he said the cat sat on the mat") is False
-
-
-def test_main_alone_does_not_force_the_hindi_voice_in_an_english_sentence() -> None:
-    """"main" is genuinely Hindi for "I" - and also an ordinary English word.
-    Short commands lean Hindi on a single hit, so this only holds for a
-    sentence long enough to dilute one incidental match.
-    """
-    assert _looks_hindi("I could not open the main window right now") is False
-
-
-def test_a_single_common_hindi_word_is_enough_for_a_short_command() -> None:
-    """The flip side of the rule above: a short phrase does not get the
-    luxury of dilution, so one clearly-Hindi word must be enough on its own.
-    """
-    assert _looks_hindi("theek hai") is True
+    assert calls
+    argv = calls[0]
+    assert argv[argv.index("-v") + 1] == speaker.cfg.voice_en
+    speaker.shutdown()

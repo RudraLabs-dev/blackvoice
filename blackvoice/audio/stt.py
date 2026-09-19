@@ -2,25 +2,16 @@
 
 Three offline tiers, tried in order, with the cloud only behind all of them:
 
-``whisper.cpp``  one multilingual model that can write a sentence which starts
-                 in English and finishes in Hindi. It is a native binary driven
-                 over a pipe, exactly as Piper is on the output side - no Python
-                 extension module, so nothing here has to be rebuilt when the
-                 system interpreter changes.
-``vosk``         two monolingual models racing on the same buffer. Kept as the
-                 fallback, and still the only thing cheap enough to sit on the
-                 microphone all day for the wake word.
+``whisper.cpp``  a more accurate model, at the cost of a subprocess per
+                 utterance. It is a native binary driven over a pipe, exactly
+                 as Piper is on the output side - no Python extension module,
+                 so nothing here has to be rebuilt when the system interpreter
+                 changes.
+``vosk``         a small, fast English model. Kept as the fallback, and still
+                 the only thing cheap enough to sit on the microphone all day
+                 for the wake word.
 ``online``       a cloud recogniser, when the offline pass came back unsure and
                  the configuration allows it.
-
-Why tiers rather than one more competitor in that race: a Vosk model can only
-emit words from its own lexicon, so on *"firefox kholo"* the English model has
-no ``kholo`` and the Hindi model has no ``firefox``. Neither can produce the
-whole sentence, and picking the more confident of two wrong halves is not a
-repair. Comparing their scores is unsound in any case - the confidences come
-from different acoustic models over different lexicons and share no scale.
-whisper.cpp has one vocabulary covering both scripts, so it either transcribes
-the sentence or it does not, and that answer is taken as it stands.
 """
 
 from __future__ import annotations
@@ -212,10 +203,6 @@ def _wav_bytes(pcm: bytes, sample_rate: int) -> bytes:
     return buffer.getvalue()
 
 
-def _has_devanagari(text: str) -> bool:
-    return any("ऀ" <= ch <= "ॿ" for ch in text)
-
-
 def _tail(stream: Optional[bytes], limit: int = 200) -> str:
     """The end of a subprocess's stderr, for a one-line log message."""
     if not stream:
@@ -288,7 +275,7 @@ class WhisperCppRecognizer:
             str(self.binary),
             "--model", str(self.model_path),
             "--file", wav_path,
-            "--language", self.speech.whisper_language or "auto",
+            "--language", self.speech.whisper_language or "en",
             "--no-timestamps",
         ]
         if self.speech.whisper_threads > 0:
@@ -352,8 +339,7 @@ class WhisperCppRecognizer:
 
         if not text:
             return Transcript("", 0.0, source="whisper")
-        language = "hi" if _has_devanagari(text) else "en"
-        return Transcript(text, _WHISPER_CONFIDENCE, language, source="whisper")
+        return Transcript(text, _WHISPER_CONFIDENCE, "en", source="whisper")
 
     @staticmethod
     def _clean(stdout: str) -> str:
@@ -379,7 +365,7 @@ class OnlineRecognizer:
     """Cloud recogniser used only when the offline pass is unsure."""
 
     #: tried in order; the first non-empty result wins
-    LANG_CODES = {"en": ["en-IN", "en-US"], "hi": ["hi-IN"], "both": ["en-IN", "hi-IN"]}
+    LANG_CODES = ["en-IN", "en-US"]
 
     def __init__(self, cfg: SpeechConfig, sample_rate: int) -> None:
         self.cfg = cfg
@@ -405,7 +391,7 @@ class OnlineRecognizer:
         recogniser.operation_timeout = self.cfg.online_timeout
         audio = sr.AudioData(pcm, self.sample_rate, 2)
 
-        for code in self.LANG_CODES.get(self.cfg.language, ["en-IN"]):
+        for code in self.LANG_CODES:
             try:
                 text = recogniser.recognize_google(audio, language=code)
             except sr.UnknownValueError:
@@ -418,9 +404,8 @@ class OnlineRecognizer:
                 continue
 
             if text and text.strip():
-                lang = "hi" if code.startswith("hi") else "en"
                 # The free endpoint returns no score; treat a hit as fairly good.
-                return Transcript(text.strip(), 0.85, lang, source="online")
+                return Transcript(text.strip(), 0.85, "en", source="online")
         return None
 
 
@@ -461,7 +446,6 @@ class HybridSTT:
             self._loaded = True
             return
 
-        wanted = ["en", "hi"] if self.speech.language == "both" else [self.speech.language]
         from ..config import Config
 
         cfg = Config()  # only used for its model_path() helpers
@@ -486,10 +470,9 @@ class HybridSTT:
         # Vosk is still loaded even when whisper leads: it backs whisper up when
         # an utterance comes back empty, and it is what feeds the live partial
         # text to the overlay, which whisper cannot do mid-utterance.
-        for lang in wanted:
-            rec = VoskRecognizer(cfg.model_path(lang), self.audio.sample_rate, lang)
-            if rec.load():
-                self.recognizers.append(rec)
+        rec = VoskRecognizer(cfg.model_path(), self.audio.sample_rate, "en")
+        if rec.load():
+            self.recognizers.append(rec)
 
         if not self.has_offline and self.speech.mode == "offline":
             log.error(

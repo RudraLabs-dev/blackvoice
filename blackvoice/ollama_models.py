@@ -56,7 +56,7 @@ LIGHTWEIGHT_MODELS: Dict[str, OllamaModel] = {
     m.name: m
     for m in (
         OllamaModel("qwen2.5:0.5b", "0.5B", 0.4, 1.0, "fastest; short answers only"),
-        OllamaModel("tinyllama", "1.1B", 0.6, 1.0, "very fast; weak Hindi"),
+        OllamaModel("tinyllama", "1.1B", 0.6, 1.0, "very fast; weaker answers"),
         OllamaModel("qwen2.5:1.5b", "1.5B", 1.0, 2.0, "the best balance for a voice assistant"),
         OllamaModel("llama3.2:1b", "1B", 1.3, 2.0),
         OllamaModel("gemma2:2b", "2B", 1.6, 3.0),
@@ -65,7 +65,7 @@ LIGHTWEIGHT_MODELS: Dict[str, OllamaModel] = {
 }
 
 #: What "auto" picks: quick enough not to make the assistant feel slow, and
-#: capable enough to hold up its end of a Hindi/English conversation.
+#: capable enough to hold up its end of a conversation.
 RECOMMENDED = "qwen2.5:1.5b"
 
 

@@ -9,17 +9,9 @@ from blackvoice.config import Config
 
 
 # ------------------------------------------------------------------ wanted
-def test_both_languages_need_two_models() -> None:
+def test_hybrid_or_offline_mode_needs_the_english_model() -> None:
     cfg = Config()
-    cfg.speech.language = "both"
-    assert models.wanted(cfg) == ["en", "hi"]
-
-
-@pytest.mark.parametrize("language", ["en", "hi"])
-def test_single_language_needs_one_model(language: str) -> None:
-    cfg = Config()
-    cfg.speech.language = language
-    assert models.wanted(cfg) == [language]
+    assert models.wanted(cfg) == ["en"]
 
 
 def test_online_mode_needs_no_models() -> None:
@@ -34,15 +26,11 @@ def test_online_mode_needs_no_models() -> None:
 def test_missing_reports_absent_models(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("blackvoice.models.MODELS_DIR", tmp_path)
     cfg = Config()
-    cfg.speech.language = "both"
-    monkeypatch.setattr(Config, "model_path", lambda self, which: tmp_path / which)
+    monkeypatch.setattr(Config, "model_path", lambda self: tmp_path / "en")
 
-    assert models.missing(cfg) == ["en", "hi"]
+    assert models.missing(cfg) == ["en"]
 
     (tmp_path / "en").mkdir()
-    assert models.missing(cfg) == ["hi"]
-
-    (tmp_path / "hi").mkdir()
     assert models.missing(cfg) == []
 
 
@@ -57,7 +45,7 @@ def test_ensure_is_a_no_op_when_models_are_present(monkeypatch) -> None:
 
 
 def test_ensure_downloads_what_is_missing(monkeypatch) -> None:
-    monkeypatch.setattr(models, "missing", lambda cfg: ["en", "hi"])
+    monkeypatch.setattr(models, "missing", lambda cfg: ["en"])
     fetched = []
 
     def _fake_download(lang, on_progress=None, timeout=60.0):
@@ -68,7 +56,7 @@ def test_ensure_downloads_what_is_missing(monkeypatch) -> None:
 
     messages = []
     assert models.ensure(Config(), on_message=messages.append) is True
-    assert fetched == ["en", "hi"]
+    assert fetched == ["en"]
     assert any("downloading" in m.lower() for m in messages)
     assert any("ready" in m.lower() for m in messages)
 
@@ -87,7 +75,7 @@ def test_ensure_respects_the_opt_out(monkeypatch) -> None:
 
 def test_ensure_survives_a_failed_download(monkeypatch) -> None:
     """No network on first run must not stop the assistant from starting."""
-    monkeypatch.setattr(models, "missing", lambda cfg: ["en", "hi"])
+    monkeypatch.setattr(models, "missing", lambda cfg: ["en"])
     monkeypatch.setattr(models, "download", lambda *a, **k: False)
 
     messages = []
@@ -102,7 +90,6 @@ def test_download_rejects_an_unknown_language() -> None:
 # ----------------------------------------------------------------- catalogue
 def test_every_wanted_language_has_a_url() -> None:
     cfg = Config()
-    cfg.speech.language = "both"
     for lang in models.wanted(cfg):
         assert lang in models.MODEL_URLS
         name, url = models.MODEL_URLS[lang]

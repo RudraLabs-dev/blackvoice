@@ -1,8 +1,8 @@
 """Downloading Piper voices.
 
-espeak-ng is instant, tiny and speaks Hindi, which is why it is the fallback.
-It is also a formant synthesiser from the 1990s lineage and many people simply
-cannot follow it, which makes a voice assistant useless however well it hears.
+espeak-ng is instant and tiny, which is why it is the fallback. It is also a
+formant synthesiser from the 1990s lineage and many people simply cannot
+follow it, which makes a voice assistant useless however well it hears.
 
 Piper is a neural synthesiser that sounds like a person. Its voices are about
 60 MB each and cannot ship in the distribution packages for the same reasons as
@@ -38,14 +38,10 @@ VOICES: Dict[str, Tuple[str, str, str]] = {
         "en", "en/en_GB/alba/medium/en_GB-alba-medium",
         "British English",
     ),
-    "hi_IN-pratham-medium": (
-        "hi", "hi/hi_IN/pratham/medium/hi_IN-pratham-medium",
-        "Hindi",
-    ),
 }
 
 #: What to fetch when the user asks for a better voice and says nothing more.
-DEFAULT_VOICES = {"en": "en_US-lessac-medium", "hi": "hi_IN-pratham-medium"}
+DEFAULT_VOICES = {"en": "en_US-lessac-medium"}
 
 ProgressFn = Callable[[str, int, int], None]
 

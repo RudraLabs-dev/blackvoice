@@ -172,10 +172,10 @@ def test_manifest_round_trip(tmp_path) -> None:
     assert samples[1].note == "noisy"
 
 
-def test_devanagari_survives_the_manifest(tmp_path) -> None:
+def test_non_ascii_text_survives_the_manifest(tmp_path) -> None:
     root = tmp_path / "eval"
-    evaluate.append_sample(root, evaluate.Sample("0001.wav", "आवाज़ बंद करो"))
-    assert evaluate.load_corpus(root)[0].reference == "आवाज़ बंद करो"
+    evaluate.append_sample(root, evaluate.Sample("0001.wav", "café ☃ mute the sound"))
+    assert evaluate.load_corpus(root)[0].reference == "café ☃ mute the sound"
 
 
 def test_a_missing_manifest_is_an_empty_corpus(tmp_path) -> None:
@@ -298,12 +298,11 @@ def test_capture_survives_periodic_ambient_blips_like_the_live_assistant_does() 
 # --------------------------------------------------------------------------- #
 # prompts
 # --------------------------------------------------------------------------- #
-def test_the_builtin_prompts_cover_all_three_registers() -> None:
+def test_the_builtin_prompts_cover_commands_and_questions() -> None:
     prompts = evaluate.load_prompts(None)
-    assert len(prompts) > 30
-    assert any("kholo" in p for p in prompts)              # Hinglish
-    assert any("खोलो" in p for p in prompts)               # Devanagari
-    assert any("open firefox" in p for p in prompts)       # English
+    assert len(prompts) > 15
+    assert any("open firefox" in p for p in prompts)
+    assert any("who wrote" in p for p in prompts)
 
 
 def test_prompts_from_a_file_skip_comments(tmp_path) -> None:
@@ -347,13 +346,13 @@ def test_score_derives_the_expected_intent_from_the_reference(
 def test_score_notices_when_a_mishearing_changes_the_routing(
     monkeypatch, tmp_path
 ) -> None:
-    root = _corpus(tmp_path, [("0001.wav", "black firefox kholo")])
+    root = _corpus(tmp_path, [("0001.wav", "black open firefox")])
     monkeypatch.setattr(
         evaluate,
         "build_backend",
-        # What a monolingual English model does to a code-switched command.
+        # A mishearing that no longer matches the open_app rule at all.
         lambda name, config: (
-            lambda pcm: Transcript("black firefox hollow oh", 0.9, "en"),
+            lambda pcm: Transcript("black opened firefox", 0.9, "en"),
             "",
         ),
     )
@@ -369,7 +368,7 @@ def test_an_explicit_intent_overrides_the_derived_one(monkeypatch, tmp_path) -> 
     evaluate.write_wav(root / "0001.wav", _pcm(6000), 16000)
     evaluate.append_sample(
         root,
-        evaluate.Sample("0001.wav", "black volume chalis karo", intent="volume_set"),
+        evaluate.Sample("0001.wav", "black set volume to forty", intent="volume_set"),
     )
     monkeypatch.setattr(
         evaluate,
@@ -415,21 +414,19 @@ def test_unknown_backend_is_unavailable() -> None:
     assert "nonsense" in reason
 
 
-def test_a_devanagari_command_is_scored_as_a_command(monkeypatch, tmp_path) -> None:
-    """The Hindi path, which is what the whisper backend actually emits."""
+def test_a_command_with_trailing_prose_punctuation_is_scored_as_a_command(
+    monkeypatch, tmp_path
+) -> None:
+    """Whisper writes prose, so a scored transcript may carry a trailing period."""
     root = tmp_path / "eval"
     root.mkdir()
     evaluate.write_wav(root / "0001.wav", _pcm(6000), 16000)
-    evaluate.append_sample(
-        root, evaluate.Sample("0001.wav", "black \u0938\u094d\u0915\u094d\u0930\u0940\u0928\u0936\u0949\u091f \u0932\u094b")
-    )
+    evaluate.append_sample(root, evaluate.Sample("0001.wav", "black take a screenshot"))
     monkeypatch.setattr(
         evaluate,
         "build_backend",
         lambda name, config: (
-            lambda pcm: Transcript(
-                "black \u0938\u094d\u0915\u094d\u0930\u0940\u0928\u0936\u0949\u091f \u0932\u094b.", 0.9, "hi"
-            ),
+            lambda pcm: Transcript("black take a screenshot.", 0.9, "en"),
             "",
         ),
     )

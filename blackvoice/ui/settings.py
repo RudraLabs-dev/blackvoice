@@ -57,8 +57,6 @@ SECTIONS: List[Tuple[str, str]] = [
 #: Fields that are a choice, not free text.
 CHOICES: Dict[str, List[str]] = {
     "speech.mode": ["hybrid", "offline", "online"],
-    "speech.language": ["both", "en", "hi"],
-    "wake.language": ["", "en", "hi"],
     "voice.engine": ["auto", "piper", "espeak", "spd-say", "pyttsx3", "none"],
     "ai.provider": ["ollama", "anthropic", "openai", "none"],
     "ui.theme": ["light", "dark"],
@@ -70,9 +68,6 @@ try:
 
     CHOICES["voice.piper_voice_en"] = [
         n for n, (lang, _p, _d) in _voices.VOICES.items() if lang == "en"
-    ]
-    CHOICES["voice.piper_voice_hi"] = [
-        n for n, (lang, _p, _d) in _voices.VOICES.items() if lang == "hi"
     ]
 except Exception:  # pragma: no cover - the window still works without them
     pass
@@ -96,17 +91,14 @@ HELP: Dict[str, str] = {
     "ai.timeout": "Seconds to wait before giving up on the backend.",
     "ai.system_prompt": "Instructions sent with every question.",
     "speech.mode": "offline never uses the network. hybrid only when Vosk is unsure.",
-    "speech.language": "both runs two models over the same audio — this is what makes Hinglish work.",
     "speech.fallback_confidence": "Below this score, hybrid mode retries online.",
-    "speech.auto_download": "Fetch the speech models on first run.",
+    "speech.auto_download": "Fetch the speech model on first run.",
     "speech.model_en": "A bare name resolves under the models directory; an absolute path is used as-is.",
-    "speech.model_hi": "A bare name resolves under the models directory; an absolute path is used as-is.",
     "speech.online_timeout": "Seconds to wait on the cloud recogniser.",
     "wake.enabled": "Turn off to use only the tray icon and typed commands.",
     "wake.phrases": "Comma separated. Two words — 'hey black' — trigger far less by accident.",
     "wake.hotkey": "Shown for reference. Bind it in your desktop's own keyboard settings.",
     "wake.chime": "Short beep when it starts listening.",
-    "wake.language": "Which model spots the wake word. Empty follows Recognition -> Language.",
     "audio.input_device": "Which microphone to use.",
     "audio.silence_threshold": "Loudness below this counts as silence. A floor, not the last "
                                "word when calibration is on. Run 'blackvoice mic' to find yours.",
@@ -122,13 +114,11 @@ HELP: Dict[str, str] = {
     "voice.rate": "Words per minute.",
     "voice.volume": "0 to 1.",
     "voice.voice_en": "espeak voice id for English.",
-    "voice.voice_hi": "espeak voice id for Hindi.",
     "voice.piper_voice_en": "Neural English voice. Downloaded on first use (~60 MB).",
-    "voice.piper_voice_hi": "Neural Hindi voice. Downloaded on first use (~60 MB).",
     "voice.piper_auto_download": "Fetch the Piper voice the first time it is needed.",
     "voice.piper_auto_install": "Fetch the Piper program itself on first run if it is not found "
                                 "anywhere - a private, per-user install, no root, about 25 MB.",
-    "voice.piper_model": "An explicit .onnx path, which overrides the two voices above.",
+    "voice.piper_model": "An explicit .onnx path, which overrides the voice above.",
     "safety.confirm_shell": "Ask before running anything that is not read-only. Leave this on.",
     "safety.blocked_patterns": "Never run, confirmation or not. One pattern per line.",
     "safety.shell_timeout": "Kill a command that runs longer than this.",

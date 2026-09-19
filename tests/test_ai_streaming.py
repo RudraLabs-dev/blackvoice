@@ -126,20 +126,19 @@ def test_the_full_reply_lands_in_history(monkeypatch, skill, sync_thread) -> Non
 # graceful degradation: no confirmed sentence boundary ever arrives
 # --------------------------------------------------------------------------- #
 def test_an_unpunctuated_reply_is_spoken_as_one_chunk(monkeypatch, skill, sync_thread) -> None:
-    """Hinglish with no Western sentence-final punctuation - explicitly
-    allowed by this project's own AI system prompt - degrades to exactly
+    """A short reply with no sentence-final punctuation degrades to exactly
     today's non-streaming behaviour rather than never being spoken.
     """
-    pieces = ["aap", " kaise", " hain"]
+    pieces = ["how", " are", " you"]
     monkeypatch.setattr(
         "requests.post", lambda *a, **k: _FakeStreamResponse(_ndjson_lines(pieces))
     )
 
-    reply = _ask(skill, "kaise ho")
+    reply = _ask(skill, "how are you")
 
-    assert reply.speech == "aap kaise hain"
+    assert reply.speech == "how are you"
     assert skill.said == []
-    assert list(skill._history)[-1] == {"role": "assistant", "content": "aap kaise hain"}
+    assert list(skill._history)[-1] == {"role": "assistant", "content": "how are you"}
 
 
 def test_a_short_single_sentence_reply_needs_no_background_thread(monkeypatch, skill, sync_thread) -> None:

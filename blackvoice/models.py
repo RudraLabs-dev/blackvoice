@@ -1,6 +1,6 @@
-"""Downloading and locating the offline speech models.
+"""Downloading and locating the offline speech model.
 
-The models are ~90 MB and cannot ship inside the distribution packages, because
+The model is ~40 MB and cannot ship inside the distribution packages, because
 a package's post-install script must not touch the network — installs have to
 work in chroots, containers and offline mirrors, and that script runs as root
 while the models belong to a user.
@@ -22,15 +22,11 @@ from .config import MODELS_DIR, Config
 
 log = logging.getLogger(__name__)
 
-#: Vosk small models — tens of megabytes each, tuned for command recognition.
+#: Vosk small model — tens of megabytes, tuned for command recognition.
 MODEL_URLS = {
     "en": (
         "vosk-model-small-en-us-0.15",
         "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip",
-    ),
-    "hi": (
-        "vosk-model-small-hi-0.22",
-        "https://alphacephei.com/vosk/models/vosk-model-small-hi-0.22.zip",
     ),
 }
 
@@ -55,16 +51,12 @@ ProgressFn = Callable[[str, int, int], None]
 
 def wanted(config: Config) -> List[str]:
     """Which languages this configuration needs on disk."""
-    if config.speech.mode == "online":
-        return []
-    if config.speech.language == "both":
-        return ["en", "hi"]
-    return [config.speech.language]
+    return [] if config.speech.mode == "online" else ["en"]
 
 
 def missing(config: Config) -> List[str]:
     """Which of the wanted models are not installed."""
-    return [lang for lang in wanted(config) if not config.model_path(lang).exists()]
+    return [lang for lang in wanted(config) if not config.model_path().exists()]
 
 
 def download(
@@ -205,9 +197,8 @@ def ensure(
         return False
 
     if on_message:
-        size = "about 40 MB" if len(absent) == 1 else "about 90 MB"
         on_message(
-            f"First run: downloading the offline speech models ({size}). "
+            "First run: downloading the offline speech model (about 40 MB). "
             "This happens once."
         )
 

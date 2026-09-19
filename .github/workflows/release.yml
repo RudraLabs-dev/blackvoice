@@ -280,8 +280,8 @@ jobs:
           cat > notes.md <<EOF
           ## Black Voice ${VERSION}
 
-          An offline-first voice assistant for Linux that speaks Hindi, English
-          and Hinglish. Speech recognition runs on your own machine.
+          An offline-first voice assistant for Linux, in English. Speech
+          recognition runs on your own machine.
 
           ### Install
 

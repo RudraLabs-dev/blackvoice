@@ -7,13 +7,13 @@ name = "blackvoice"
 # Single source of truth: blackvoice/__init__.py. The release workflow
 # refuses to build when the git tag and this value disagree.
 dynamic = ["version"]
-description = "Black Voice — an offline-first voice assistant for Linux (Hindi + English). A Rudra Labs product."
+description = "Black Voice — an offline-first English voice assistant for Linux. A Rudra Labs product."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Rudra Labs" }]
 maintainers = [{ name = "Gaurav Sharma" }]
-keywords = ["voice-assistant", "linux", "vosk", "speech-recognition", "hindi"]
+keywords = ["voice-assistant", "linux", "vosk", "speech-recognition"]
 classifiers = [
   "Environment :: X11 Applications :: Qt",
   "Intended Audience :: End Users/Desktop",

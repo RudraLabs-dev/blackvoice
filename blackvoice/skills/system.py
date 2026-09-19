@@ -48,15 +48,8 @@ APP_ALIASES = {
     "discord": ["discord"],
     "slack": ["slack"],
     "whatsapp": ["whatsapp-for-linux", "whatsdesk"],
+    "internet": ["firefox", "chromium", "google-chrome", "brave-browser", "vivaldi", "epiphany"],
 }
-
-#: Hindi/Hinglish words people use for the same apps.
-APP_ALIASES.update({
-    "browser kholo": APP_ALIASES["browser"],
-    "internet": APP_ALIASES["browser"],
-    "gaana": APP_ALIASES["music"],
-    "calculator kholo": APP_ALIASES["calculator"],
-})
 
 
 class SystemSkill(Skill):
@@ -387,7 +380,7 @@ class SystemSkill(Skill):
     # -------------------------------------------------------------- radios
     @staticmethod
     def _wants_on(state: str) -> bool:
-        return (state or "").strip().lower() in {"on", "chalu", "चालू", "enable", "start"}
+        return (state or "").strip().lower() in {"on", "enable", "start"}
 
     def _do_wifi(self, intent: Intent) -> Reply:
         on = self._wants_on(intent.slots.get("state", "on"))

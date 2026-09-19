@@ -83,11 +83,8 @@ class SpeechConfig:
 
     #: "hybrid" | "offline" | "online"
     mode: str = "hybrid"
-    #: Vosk model folders, resolved under MODELS_DIR when not absolute
+    #: Vosk model folder, resolved under MODELS_DIR when not absolute
     model_en: str = "vosk-model-small-en-us-0.15"
-    model_hi: str = "vosk-model-small-hi-0.22"
-    #: which language model to load: "en", "hi" or "both"
-    language: str = "both"
 
     # ---------------------------------------------------------- whisper.cpp
     #: Which offline engine leads: "auto" | "whisper" | "vosk".
@@ -101,10 +98,8 @@ class SpeechConfig:
     whisper_binary: str = ""
     #: GGML model file, resolved under MODELS_DIR when not absolute
     whisper_model: str = "ggml-base-q5_1.bin"
-    #: "auto" detects the language per utterance; "en" or "hi" force one.
-    #: Leave it on auto - pinning a language is precisely what breaks a
-    #: sentence that switches halfway, which is the normal case here.
-    whisper_language: str = "auto"
+    #: pinned to English - this assistant only understands English commands.
+    whisper_language: str = "en"
     #: decoder threads; 0 lets whisper.cpp choose from the core count
     whisper_threads: int = 0
     #: seconds to wait for a transcript before giving up on the utterance
@@ -114,8 +109,8 @@ class SpeechConfig:
     #: towards the words this assistant can actually act on. It is not a
     #: grammar: anything may still be transcribed.
     whisper_prompt: str = (
-        "Black, firefox kholo. Black, volume 40 karo. Black, screenshot lo. "
-        "Black, brightness badhao. Black, wifi band karo. Black, timer lagao. "
+        "Black, open firefox. Black, set volume to 40. Black, take a screenshot. "
+        "Black, brightness up. Black, turn off wifi. Black, set a timer. "
         "Black, open chrome. Black, close the terminal. Black, lock the screen."
     )
     #: below this Vosk confidence the hybrid mode retries online
@@ -138,11 +133,6 @@ class WakeConfig:
     hotkey: str = "Ctrl+Alt+Space"
     #: play a short beep when activated
     chime: bool = True
-    #: which Vosk model the wake word is spotted in: "en" or "hi". Blank
-    #: inherits speech.language ("both" maps to "en", since the wake grammar
-    #: needs one model either way and the wake phrases here are Roman script).
-    #: Leave it blank unless the wake word itself is only ever said in Hindi.
-    language: str = ""
 
 
 @dataclass
@@ -156,13 +146,11 @@ class VoiceConfig:
     #: listener is not a native English speaker.
     rate: int = 145
     volume: float = 0.9
-    #: espeak voice ids
+    #: espeak voice id
     voice_en: str = "en-us"
-    voice_hi: str = "hi"
-    #: Piper neural voices, downloaded on demand. These are what make the
+    #: Piper neural voice, downloaded on demand. This is what makes the
     #: assistant sound like a person rather than a 1990s synthesiser.
     piper_voice_en: str = "en_US-lessac-medium"
-    piper_voice_hi: str = "hi_IN-pratham-medium"
     #: fetch the Piper voice the first time it is needed
     piper_auto_download: bool = True
     #: fetch the Piper *program* itself on first run if no copy is found
@@ -196,6 +184,14 @@ class AIConfig:
     #: commitment than anything else this project downloads automatically,
     #: and defaults should not make that choice for someone silently.
     auto_install: bool = False
+    #: Let a free-form question that the regex router could not classify
+    #: actually run a shell command - via Ollama's tool calling - instead of
+    #: only being talked about. The command goes through the exact same
+    #: ShellGuard as a spoken "run command X": a handful of destructive
+    #: patterns are refused outright, anything else that could change the
+    #: system still pauses for a spoken "yes", and nothing ever runs as root.
+    #: Only wired up for the ollama provider today.
+    tools_enabled: bool = True
     anthropic_model: str = "claude-opus-5"
     openai_model: str = "gpt-4o-mini"
     #: left blank on purpose - read from ANTHROPIC_API_KEY / OPENAI_API_KEY
@@ -211,8 +207,9 @@ class AIConfig:
         "Answer the question that was asked and stop - do not offer follow-ups "
         "or ask whether they want more. "
         "If you do not know, say so plainly rather than guessing. "
-        "Match the language you are spoken to in: reply in Hindi to Hindi, and "
-        "in the same Hinglish mixture when that is how the question came."
+        "When a request needs something actually done on this machine rather "
+        "than explained, use the run_command tool instead of describing the "
+        "command - the user is talking to you, not reading a terminal."
     )
 
 
@@ -308,9 +305,9 @@ class Config:
     def models_dir(self) -> Path:
         return MODELS_DIR
 
-    def model_path(self, which: str) -> Path:
-        """Absolute path to a Vosk model directory ("en" or "hi")."""
-        name = self.speech.model_en if which == "en" else self.speech.model_hi
+    def model_path(self) -> Path:
+        """Absolute path to the Vosk model directory."""
+        name = self.speech.model_en
         p = Path(name).expanduser()
         return p if p.is_absolute() else MODELS_DIR / name
 

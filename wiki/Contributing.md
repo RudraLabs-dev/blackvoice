@@ -46,13 +46,13 @@ print('ok')
 ```bash
 pytest -q                        # everything
 pytest tests/test_router.py -v   # one file
-pytest -k "hindi or wake"        # by name
+pytest -k "router or wake"       # by name
 pytest --cov=blackvoice          # coverage
 ```
 
 | File | Covers | Tests |
 |---|---|---|
-| `test_router.py` | Intent routing, both languages | 48 |
+| `test_router.py` | Intent routing | 48 |
 | `test_safety.py` | The shell guard | 31 |
 | `test_skills.py` | Calculator, notes, timers, registry, AI fallbacks | 25 |
 | `test_config.py` | Loading, merging, environment overrides | 14 |
@@ -63,11 +63,10 @@ pytest --cov=blackvoice          # coverage
 
 ### What to test
 
-**A new command** needs a routing case in `test_router.py`, in both languages:
+**A new command** needs a routing case in `test_router.py`:
 
 ```python
 ("i had a coffee", "coffee", "add", {}),
-("coffee pi li", "coffee", "add", {}),
 ```
 
 **A new skill** needs its own tests. Skills are plain objects — see
@@ -208,17 +207,22 @@ version. Support for them can be added when there is a reason to need it.
 
 ## Adding a language
 
-The architecture does not assume two languages. To add a third:
+Recognition is English-only today — `SpeechConfig` has a single `model_en`
+field, and `Config.model_path()` resolves it directly with no language
+argument. Bringing back a second language means re-introducing the
+per-language plumbing an earlier version of this project had:
 
 1. Find a [Vosk model](https://alphacephei.com/vosk/models) for it
 2. Add it to `MODEL_URLS` in `blackvoice/models.py`
-3. Add a `model_xx` field to `SpeechConfig`
-4. Extend `HybridSTT.load()` to load it
+3. Give `SpeechConfig` a field for it, and teach `Config.model_path()` (or a
+   replacement) which one to load
+4. Extend `HybridSTT` to load and race it alongside the English model
 5. Add patterns to `intents.py` in that language
 6. Add routing tests
 
-The hybrid recogniser already runs every loaded model over the same buffer and
-keeps the most confident result, so a third model needs no changes there.
+This is more than a content change — the single-model design removed the
+multi-model loading and racing logic itself, not just the extra-language
+patterns.
 
 ## Where to start
 

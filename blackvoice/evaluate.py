@@ -331,12 +331,10 @@ def build_backend(name: str, config: Config) -> Tuple[Optional[Runner], str]:
         return rec.transcribe, ""
 
     if name == "vosk":
-        wanted = ["en", "hi"] if config.speech.language == "both" else [config.speech.language]
         loaded: List[VoskRecognizer] = []
-        for lang in wanted:
-            rec = VoskRecognizer(config.model_path(lang), rate, lang)
-            if rec.load():
-                loaded.append(rec)
+        rec = VoskRecognizer(config.model_path(), rate, "en")
+        if rec.load():
+            loaded.append(rec)
         if not loaded:
             return None, "no Vosk model could be loaded"
 
@@ -448,12 +446,9 @@ def compare(
 # --------------------------------------------------------------------------- #
 # Prompts to record
 # --------------------------------------------------------------------------- #
-#: A starting corpus spanning the intent space in all three registers the
-#: assistant claims to handle. The Hinglish lines are the point of the exercise:
-#: they are the ones no monolingual model can get right, so they are where two
-#: candidate engines will actually differ.
+#: A starting corpus spanning the intent space this assistant handles.
 DEFAULT_PROMPTS: List[str] = [
-    # English commands
+    # Commands
     "black open firefox",
     "black close the terminal",
     "black volume 40",
@@ -470,39 +465,15 @@ DEFAULT_PROMPTS: List[str] = [
     "black next track",
     "black pause the music",
     "black how much disk space is left",
-    # Hinglish - the code-switched cases
-    "black firefox kholo",
-    "black terminal band karo",
-    "black volume chalis karo",
-    "black awaaz band karo",
-    "black brightness badhao",
-    "black screenshot lo",
-    "black screen lock karo",
-    "black wifi band karo",
-    "black bluetooth chalu karo",
-    "black downloads folder kholo",
-    "black time kya hai",
-    "black paanch minute ka timer lagao",
-    "black python tutorials search karo",
-    "black agla gaana chalao",
-    "black gaana rok do",
-    "black chrome kholo aur volume kam karo",
-    "black notes mein likho doodh lena hai",
-    "black kitni disk space bachi hai",
-    # Hindi
-    "black फायरफॉक्स खोलो",
-    "black आवाज़ बंद करो",
-    "black स्क्रीनशॉट लो",
-    "black समय क्या है",
-    "black वाईफाई बंद करो",
+    "black take a note buy milk",
     # Questions, which should reach the AI rather than a command
     "black who wrote the mahabharata",
-    "black sheher ka mausam kaisa hai",
+    "black what is the weather like today",
     "black explain what a kernel is",
     # Near misses worth having in the corpus
     "black open fire fox",
     "black volume forty percent",
-    "black ruko",
+    "black stop",
 ]
 
 

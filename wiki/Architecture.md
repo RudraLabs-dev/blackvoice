@@ -76,7 +76,7 @@ flowchart TD
     W -->|yes| WR[Transcribe with whisper.cpp]
     WR -->|got text| DONE[Use it]
     WR -->|nothing| V
-    W -->|no| V{Vosk - en + hi race<br/>on the same buffer}
+    W -->|no| V[Transcribe with Vosk]
     V --> C{confident enough?<br/>hybrid mode only}
     C -->|yes| DONE
     C -->|no| O{online?}
@@ -84,22 +84,15 @@ flowchart TD
     O -->|no| DONE
 ```
 
-**Why not just let Vosk's two models race, always?** A Vosk model can only
-emit words from its own lexicon. On *"firefox kholo"* the English model has no
-`kholo` and the Hindi model has no `firefox` — neither can produce the whole
-sentence, and taking the more confident of two wrong halves is not a repair.
-Their confidence scores are not even on the same scale to compare, coming from
-different acoustic models over different lexicons. whisper.cpp has one
-vocabulary covering both scripts, so it either gets the sentence or it does
-not, and that answer is taken as it stands rather than raced against anything.
+**Why use whisper.cpp over Vosk at all?** It is simply a more accurate model.
+Vosk is small and fast enough to keep loaded all the time, but whisper.cpp
+gets more commands right, at the cost of a subprocess call per utterance
+instead of a streaming pass.
 
 **Why is Vosk still here, then?** Two reasons: it is the fallback for a
 machine that has not installed whisper.cpp (`speech.engine: "auto"`, the
 default, degrades to it silently — see [Configuration → speech](Configuration#speech--recognition)),
-and it is what streams, which is why it alone does wake-word detection. With
-`language: "both"` the English and Hindi models each transcribe the same
-buffer and the higher average word confidence wins, same as before whisper.cpp
-existed — just now the second choice rather than the first.
+and it is what streams, which is why it alone does wake-word detection.
 
 Connectivity, for the cloud tier, is probed with a 1-second TCP connect to
 `8.8.8.8:53`, cached for 20 seconds so it is not repeated per utterance.
@@ -114,8 +107,7 @@ A rule is a regex with optional named groups; a named group becomes a slot.
 
 ```python
 Rule("volume_set", "system", "volume_set", [
-    r"\b(?:set\s+)?volume\s*(?:to|at|=|par)?\s*(?P<value>\d{1,3})\b",
-    r"\b(?:awaaz|आवाज़)\s*(?P<value>\d{1,3})\s*kar(?:o|do)?\b",
+    r"\b(?:set\s+)?volume\s*(?:to|at|=)?\s*(?P<value>\d{1,3})\b",
 ])
 ```
 
@@ -276,7 +268,7 @@ blackvoice/
 │   ├── tts.py        speech output
 │   └── wake.py       wake-word detection
 ├── nlu/
-│   ├── intents.py    42 rules, Hindi + English
+│   ├── intents.py    42 rules, English
 │   └── router.py     matching and the AI fallback
 ├── skills/
 │   ├── base.py       Skill, Reply, SkillRegistry

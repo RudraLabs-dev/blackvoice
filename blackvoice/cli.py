@@ -176,7 +176,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     if args.ollama:
         return _setup_ollama(args)
 
-    wanted = ["en", "hi"] if args.language == "both" else [args.language]
+    wanted = ["en"]
     failures = 0
 
     for lang in wanted:
@@ -737,29 +737,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
           f"{whisper_model.name if whisper_model.exists() else 'not installed'}")
 
     if whisper_binary and whisper_model.exists():
-        print(f"  {OK} Hinglish in one pass (whisper.cpp leads, Vosk backs it up)")
-    elif config.speech.language == "both":
-        # Vosk still works on its own - this is not fatal - but it is the
-        # single biggest thing standing between this install and a sentence
-        # that switches language halfway, so it earns a real problems-list
-        # entry rather than being an aside nobody reads until something
-        # already sounds wrong.
-        print(f"  {BAD} Vosk only: a sentence mixing Hindi and English will")
-        print("      lose half of itself.")
-        problems.append("blackvoice setup --whisper")
+        print(f"  {OK} whisper.cpp leads, Vosk backs it up")
     else:
-        print(f"  {DOT} whisper.cpp is not installed, but speech.language is not "
-              "'both' - no code-switched sentence to lose half of")
+        print(f"  {DOT} whisper.cpp is not installed - Vosk is doing all the work")
 
     print("\nModels")
-    for lang in ("en", "hi"):
-        path = config.model_path(lang)
-        if path.exists():
-            print(f"  {OK} {lang}  {path}")
-        else:
-            print(f"  {BAD} {lang}  missing ({path})")
-
-    if not any(config.model_path(l).exists() for l in ("en", "hi")):
+    path = config.model_path()
+    if path.exists():
+        print(f"  {OK} en  {path}")
+    else:
+        print(f"  {BAD} en  missing ({path})")
         problems.append("blackvoice setup")
 
     print("\nMicrophones")
@@ -1061,10 +1048,6 @@ def build_parser() -> argparse.ArgumentParser:
     text.set_defaults(func=cmd_text)
 
     setup = sub.add_parser("setup", help="download the offline speech models")
-    setup.add_argument(
-        "--language", choices=["en", "hi", "both"], default="both",
-        help="which models to fetch (default: both)",
-    )
     setup.add_argument("--force", action="store_true", help="re-download even if present")
     setup.add_argument(
         "--whisper", action="store_true",

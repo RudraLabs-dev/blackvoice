@@ -3,7 +3,7 @@
 Tries the best engine available on the machine, in this order:
 
 1. ``piper``    - neural, natural sounding, needs a downloaded voice model
-2. ``espeak-ng``- tiny, instant, speaks Hindi out of the box
+2. ``espeak-ng``- tiny, instant, no download needed
 3. ``spd-say``  - speech-dispatcher, present on most desktop distros
 4. ``pyttsx3``  - pure-Python wrapper, last resort
 
@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import logging
 import queue
-import re
 import shutil
 import subprocess
 import threading
@@ -50,59 +49,6 @@ def detect_engine() -> str:
         return "pyttsx3"
     except ImportError:
         return "none"
-
-
-#: Common romanised Hindi/Hinglish function words - a short, deliberately
-#: unglamorous list rather than a language-id model. This project already
-#: makes that same trade everywhere else (the romanised alternations threaded
-#: through nlu/intents.py, matched the same way) rather than pulling in a
-#: statistical detector to answer a question this cheap.
-_HINDI_ROMAN_WORDS = frozenset(
-    """
-    hai hain hoon ho tha thi raha rahi rahe
-    kar karo karna kiya kijiye kijiyega
-    nahi nahin haan
-    kya kaun kaise kahan kab kyun kyu kitna kitne kitni
-    mera meri mere tera teri tere hamara hamari hamare tumhara tumhari tumhare
-    aap tum main hum yeh ye woh wo inhe unhe
-    ka ki ke ko mein se par
-    band chalu khol kholo bolo bata batao suno sun le lo lena
-    accha acha theek thik bahut bilkul zaroor
-    """.split()
-)
-
-#: One matched word is enough to call a short command Hindi; a longer
-#: sentence needs a real share of it to actually be Hindi, so a single
-#: incidental "ka" or "ho" inside an English sentence does not flip the
-#: whole reply to the wrong voice.
-_HINDI_ROMAN_SHARE = 0.25
-
-
-def _looks_hindi(text: str) -> bool:
-    """True for Devanagari, or for romanised Hindi/Hinglish.
-
-    Devanagari is unambiguous; romanised Hindi is not - "hai", "kya" and
-    "kar" are also just English-looking tokens with nothing in the script to
-    tell them apart. That ambiguity cannot be shrugged off here, because the
-    text this function has to route is very often exactly that: AISkill's own
-    system prompt asks it to answer "in the same Hinglish mixture when that
-    is how the question came," so a reply like "aap kaise hain" or "yeh ek
-    test hai" carries no Devanagari at all. Missing that sent every such
-    reply to the English voice, which guesses English pronunciations for
-    Hindi words it was never trained on - the actual source of the "robotic"
-    sound reported from a real machine, and not something a correctly
-    working neural voice can fix by itself once it has been handed the wrong
-    language to begin with.
-    """
-    if any("ऀ" <= ch <= "ॿ" for ch in text):
-        return True
-    words = re.findall(r"[a-zA-Z']+", text.lower())
-    if not words:
-        return False
-    hits = sum(1 for w in words if w in _HINDI_ROMAN_WORDS)
-    if len(words) <= 4:
-        return hits >= 1
-    return hits / len(words) >= _HINDI_ROMAN_SHARE
 
 
 class Speaker:
@@ -177,11 +123,10 @@ class Speaker:
                     pass
 
     def _speak_now(self, text: str) -> None:
-        hindi = _looks_hindi(text)
         if self.engine == "piper":
             self._speak_piper(text)
         elif self.engine == "espeak":
-            self._speak_espeak(text, hindi)
+            self._speak_espeak(text)
         elif self.engine == "spd-say":
             self._speak_spd(text)
         elif self.engine == "pyttsx3":
@@ -209,15 +154,14 @@ class Speaker:
             with self._lock:
                 self._proc = None
 
-    def _piper_voice_for(self, hindi: bool) -> Optional[str]:
+    def _piper_voice_for(self) -> Optional[str]:
         """Which .onnx to speak this text with, fetching it if need be."""
         if self.cfg.piper_model:
             return self.cfg.piper_model
 
         from .. import voices
 
-        language = "hi" if hindi else "en"
-        name = self.cfg.piper_voice_hi if hindi else self.cfg.piper_voice_en
+        name = self.cfg.piper_voice_en
 
         if voices.installed(name):
             return str(voices.voice_path(name))
@@ -225,11 +169,11 @@ class Speaker:
         if not self.cfg.piper_auto_download:
             return None
 
-        path = voices.ensure(language, name, on_message=lambda m: log.info("%s", m))
+        path = voices.ensure("en", name, on_message=lambda m: log.info("%s", m))
         return str(path) if path else None
 
     def _speak_piper(self, text: str) -> None:
-        model = self._piper_voice_for(_looks_hindi(text))
+        model = self._piper_voice_for()
         if not model:
             log.warning("no piper voice available; falling back to espeak-ng")
             self.engine = "espeak" if (_which("espeak-ng") or _which("espeak")) else "none"
@@ -291,9 +235,9 @@ class Speaker:
             with self._lock:
                 self._proc = None
 
-    def _speak_espeak(self, text: str, hindi: bool) -> None:
+    def _speak_espeak(self, text: str) -> None:
         binary = _which("espeak-ng") or _which("espeak")
-        voice = self.cfg.voice_hi if hindi else self.cfg.voice_en
+        voice = self.cfg.voice_en
         argv = [
             binary,
             "-v", voice,

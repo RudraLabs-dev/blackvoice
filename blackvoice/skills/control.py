@@ -13,8 +13,8 @@ from .base import Reply, Skill
 HELP_TEXT = """Black Voice — what I understand
 
 System
-  open firefox / firefox kholo          launch an application
-  close chrome / chrome band karo       quit an application
+  open firefox                          launch an application
+  close chrome                          quit an application
   volume up · volume 40 · mute          sound control
   brightness down · brightness 70       screen brightness
   screenshot · lock screen              screen actions

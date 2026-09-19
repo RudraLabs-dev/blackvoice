@@ -17,8 +17,6 @@ log = logging.getLogger(__name__)
 #: Words that make a sentence a question rather than a command.
 _QUESTION_HINTS = (
     "who", "what", "why", "how", "when", "where", "which", "explain", "tell me about",
-    "kaun", "kyun", "kyu", "kaise", "kab", "kahan", "kya hai", "batao",
-    "कौन", "क्यों", "कैसे", "कब", "कहाँ", "क्या है", "बताओ",
 )
 
 

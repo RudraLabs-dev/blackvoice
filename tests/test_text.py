@@ -42,12 +42,6 @@ def test_a_decimal_point_is_never_mistaken_for_a_sentence_end() -> None:
     assert remainder == "It costs 2.5 dollars and it"
 
 
-def test_the_devanagari_danda_is_a_sentence_boundary_too() -> None:
-    sentences, remainder = split_ready_sentences("सो जाओ। अब")
-    assert sentences == ["सो जाओ।"]
-    assert remainder == "अब"
-
-
 def test_exclamation_and_question_marks_are_boundaries() -> None:
     sentences, remainder = split_ready_sentences("Watch out! Are you okay? I")
     assert sentences == ["Watch out!", "Are you okay?"]

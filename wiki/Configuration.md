@@ -47,11 +47,9 @@ than crashing the assistant.
   "mode": "hybrid",
   "engine": "auto",
   "model_en": "vosk-model-small-en-us-0.15",
-  "model_hi": "vosk-model-small-hi-0.22",
-  "language": "both",
   "whisper_binary": "",
   "whisper_model": "ggml-base-q5_1.bin",
-  "whisper_language": "auto",
+  "whisper_language": "en",
   "fallback_confidence": 0.55,
   "online_timeout": 6.0,
   "auto_download": true
@@ -61,8 +59,8 @@ than crashing the assistant.
 Three offline tiers are tried in order, cloud only behind all of them:
 
 1. **whisper.cpp**, when `engine` allows it and both the binary and model are
-   present — one vocabulary covering Hindi and English, so it can transcribe a
-   sentence that switches language halfway instead of racing two guesses.
+   present — more accurate than Vosk, at the cost of a subprocess per
+   utterance.
 2. **Vosk**, always loaded — the fallback when whisper.cpp is absent or came
    back with nothing, and the only one of the three that streams, which is why
    it also does wake-word detection on its own.
@@ -73,14 +71,13 @@ Three offline tiers are tried in order, cloud only behind all of them:
 |---|---|---|
 | `mode` | `hybrid` | `offline` — never touches the network. `online` — cloud only. `hybrid` — offline first, cloud only when unsure. |
 | `engine` | `auto` | `auto` uses whisper.cpp when it is installed and quietly falls back to Vosk otherwise. `whisper` or `vosk` pin one. |
-| `language` | `both` | Which Vosk model(s) to load — `en`, `hi`, or `both`. Only matters for the Vosk tier; whisper.cpp's `whisper_language` is separate. |
 | `whisper_binary` | *(blank)* | Path to `whisper-cli`. Blank searches `PATH`, then the copy a `.deb`/`.rpm` bundles. |
 | `whisper_model` | `ggml-base-q5_1.bin` | GGML model file — see [Speech models](Installation#speech-models). A bare name resolves under `~/.local/share/blackvoice/models`. |
-| `whisper_language` | `auto` | `auto` detects per utterance — the setting to leave alone, since pinning a language is exactly what breaks a sentence that switches halfway. `en` or `hi` force one. |
+| `whisper_language` | `en` | Pinned — recognition is English-only, so there is nothing to detect per utterance. |
 | `fallback_confidence` | `0.55` | Below this Vosk score, `hybrid` retries online. Only reached when whisper.cpp did not answer. |
-| `model_en` / `model_hi` | small models | A bare name resolves under `~/.local/share/blackvoice/models`; an absolute path is used as-is. |
+| `model_en` | small model | A bare name resolves under `~/.local/share/blackvoice/models`; an absolute path is used as-is. |
 | `online_timeout` | `6.0` | Seconds to wait on the cloud recogniser. |
-| `auto_download` | `true` | Fetch the Vosk models on first run when they are missing. whisper.cpp is opt-in and not part of this — see below. |
+| `auto_download` | `true` | Fetch the Vosk model on first run when it is missing. whisper.cpp is opt-in and not part of this — see below. |
 
 Nothing is downloaded when `mode` is `"online"` — that configuration never uses
 a local model.
@@ -101,7 +98,7 @@ blackvoice setup --whisper --model ggml-small-q5_1.bin --force
 `blackvoice doctor` reports whether the binary and the model are both present
 — either one missing and `engine: "auto"` silently uses Vosk instead.
 
-**Using a larger Vosk model** — the small models are ~50 MB and tuned for
+**Using a larger Vosk model** — the small model is ~50 MB and tuned for
 commands. For better accuracy without whisper.cpp, download a larger one and
 point at it:
 
@@ -109,15 +106,11 @@ point at it:
 "model_en": "/home/you/models/vosk-model-en-us-0.22"
 ```
 
-Loading two large models doubles the memory cost, so consider
-`"language": "en"` if you do.
-
 **Is it working well on your voice?** `blackvoice eval record` walks through a
-set of prompts covering English, Hindi and Hinglish and records your voice
-saying them; `blackvoice eval run` scores every backend you have installed
-against the same recordings — word error rate, and intent accuracy, which is
-the number that matters: whether a mishearing actually changed which command
-ran.
+set of prompts and records your voice saying them; `blackvoice eval run`
+scores every backend you have installed against the same recordings — word
+error rate, and intent accuracy, which is the number that matters: whether a
+mishearing actually changed which command ran.
 
 ## `wake` — the wake word
 
@@ -126,8 +119,7 @@ ran.
   "enabled": true,
   "phrases": ["black", "blek", "blak"],
   "hotkey": "Ctrl+Alt+Space",
-  "chime": true,
-  "language": ""
+  "chime": true
 }
 ```
 
@@ -137,7 +129,9 @@ ran.
 | `phrases` | three spellings of “black” | Anything in this list activates it. The extra spellings catch how the recogniser writes the word. |
 | `hotkey` | `Ctrl+Alt+Space` | **Display only.** Black Voice does not grab keys — bind this in your desktop's keyboard settings. |
 | `chime` | `true` | Short beep when it starts listening. |
-| `language` | *(blank)* | Which Vosk model spots the wake word — `en` or `hi`. Blank follows `speech.language` (`"both"` maps to `en`). Set this only if the wake word itself is said in Hindi on a Hindi-primary install; before this existed it was silently always English regardless of `speech.language`. |
+
+The wake word always uses the English Vosk model — there is nothing to
+configure here.
 
 ### False triggers
 
@@ -188,9 +182,7 @@ listening still feels wrong after a config change.
   "rate": 145,
   "volume": 0.9,
   "voice_en": "en-us",
-  "voice_hi": "hi",
   "piper_voice_en": "en_US-lessac-medium",
-  "piper_voice_hi": "hi_IN-pratham-medium",
   "piper_auto_download": true,
   "piper_auto_install": true,
   "piper_model": ""
@@ -198,14 +190,11 @@ listening still feels wrong after a config change.
 ```
 
 `engine` is `auto` by default and picks the best available: **piper** (neural,
-sounds like a person), then **espeak-ng** (tiny, instant, speaks Hindi), then
-**spd-say**, then **pyttsx3**. Set it explicitly to force one, or `"none"` to
-print replies instead of speaking them.
+sounds like a person), then **espeak-ng** (tiny, instant), then **spd-say**,
+then **pyttsx3**. Set it explicitly to force one, or `"none"` to print replies
+instead of speaking them.
 
-Hindi is detected two ways, not just by Devanagari script: an AI reply written
-in Hinglish (romanised Hindi, no Devanagari at all) is recognised by a short
-list of common Hindi words, so it is spoken with `voice_hi` too rather than an
-English voice guessing at pronunciations it was never trained on.
+Replies always speak with the English voice (`voice_en` / `piper_voice_en`).
 
 ```bash
 blackvoice say "testing one two three"
@@ -214,20 +203,19 @@ blackvoice say "testing one two three"
 **Piper is installed automatically.** `piper_auto_install` (on by default)
 fetches the Piper *program* itself on first run if it is not found anywhere —
 a private, per-user install, no root, about 25 MB, the same size class as the
-speech models this project already downloads without asking. `piper_auto_download`
-(also on by default) separately fetches the *voice* (`piper_voice_en` /
-`piper_voice_hi`, ~60 MB each) the first time it is actually needed. Turn
-either off and Black Voice falls back to espeak-ng, which is always available
-but sounds noticeably more robotic. Fetch the program by hand, or check
-whether it is already there:
+speech model this project already downloads without asking. `piper_auto_download`
+(also on by default) separately fetches the *voice* (`piper_voice_en`, ~60 MB)
+the first time it is actually needed. Turn either off and Black Voice falls
+back to espeak-ng, which is always available but sounds noticeably more
+robotic. Fetch the program by hand, or check whether it is already there:
 
 ```bash
 blackvoice setup --piper
-blackvoice voice           # shows the installed binary and voices
+blackvoice voice           # shows the installed binary and voice
 ```
 
 For a specific `.onnx` voice file, set `piper_model` to its absolute path —
-this overrides `piper_voice_en`/`piper_voice_hi`.
+this overrides `piper_voice_en`.
 
 ## `ai` — the question-answering backend
 
@@ -266,8 +254,8 @@ no manual step after that, ever, for anyone who turns it on. It is off by
 default for one concrete reason: there is no small build. Upstream publishes
 one general Linux build per architecture and it bundles CUDA support
 already; the smallest one for x86_64 is over a gigabyte. That is a
-meaningfully different bandwidth and disk commitment than the ~90 MB of
-speech models this project already fetches automatically, and a default
+meaningfully different bandwidth and disk commitment than the ~40 MB
+speech model this project already fetches automatically, and a default
 should not make that choice on your behalf.
 
 What `auto_install` never does, on or off, is run Ollama's own installer
@@ -312,9 +300,9 @@ clear message with the install link the first time a question needs it.
 **Replies are spoken as they are generated,** not after the whole answer has
 finished — the first sentence is spoken the moment it is complete, while the
 rest keeps streaming in and is spoken sentence by sentence behind it. A short
-reply with no sentence-ending punctuation (common in Hinglish) is still
-spoken as one chunk once the stream ends, exactly as before; only longer,
-punctuated answers get the head start. This applies to Ollama only — Claude
+reply with no sentence-ending punctuation is still spoken as one chunk once
+the stream ends, exactly as before; only longer, punctuated answers get the
+head start. This applies to Ollama only — Claude
 and OpenAI answer in one blocking call, as they always have.
 
 ### Claude

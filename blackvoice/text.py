@@ -13,11 +13,11 @@ from __future__ import annotations
 import re
 from typing import List, Tuple
 
-#: Sentence-ending punctuation, including the Devanagari danda. Requiring
-#: whitespace or end-of-string after it is what leaves a decimal point like
-#: "2.5" alone - arithmetic is a real command in this project, and Whisper
-#: writes prose where Vosk writes bare words.
-SENTENCE_PUNCT = re.compile(r"[.!?।]+(?=\s|$)")
+#: Sentence-ending punctuation. Requiring whitespace or end-of-string after it
+#: is what leaves a decimal point like "2.5" alone - arithmetic is a real
+#: command in this project, and Whisper writes prose where Vosk writes bare
+#: words.
+SENTENCE_PUNCT = re.compile(r"[.!?]+(?=\s|$)")
 
 
 def split_ready_sentences(buffer: str) -> Tuple[List[str], str]:
@@ -34,9 +34,8 @@ def split_ready_sentences(buffer: str) -> Tuple[List[str], str]:
 
     A buffer with no confirmed boundary yet returns no sentences and the
     buffer unchanged, which is exactly how a short or unpunctuated reply
-    (common in Hinglish, which this project's own AI system prompt
-    deliberately allows for) degrades to being spoken as a single chunk once
-    the stream ends, rather than never being flushed at all.
+    degrades to being spoken as a single chunk once the stream ends, rather
+    than never being flushed at all.
     """
     sentences: List[str] = []
     start = 0

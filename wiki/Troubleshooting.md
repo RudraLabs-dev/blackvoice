@@ -146,13 +146,9 @@ blackvoice text "the exact phrase"
 If text mode does the right thing, recognition is the problem. If it does the
 wrong thing, the routing rules are — open an issue with the phrase.
 
-**Install whisper.cpp if `speech.language` is `"both"`.** This is the single
-biggest fix for Hinglish specifically. Without it, two separate Vosk models
-race on the same audio, and neither one has the other's vocabulary — on a
-sentence that switches language partway (*"black, chrome kholo aur volume kam
-karo"*), each model can only get its own half right, so the more confident
-guess still loses the other half. `blackvoice doctor` calls this out as a
-problem when it applies to your setup. Fix it with:
+**Install whisper.cpp.** It is more accurate than Vosk, and is the single
+biggest fix for recognition quality generally. `blackvoice doctor` calls out
+whisper.cpp as missing when it applies to your setup. Fix it with:
 
 ```bash
 blackvoice setup --whisper
@@ -162,15 +158,7 @@ whisper.cpp is a native binary and a separate download, not a Python package
 — see [Configuration](Configuration#speech--recognition) for what
 `blackvoice doctor` and `blackvoice setup --whisper` actually check.
 
-**Load one model instead of two.** If installing whisper.cpp is not an
-option, two models on the same audio is what makes Hinglish work at all, but
-a single one is more accurate for a single language:
-
-```jsonc
-"speech": { "language": "en" }
-```
-
-**Use a bigger model.** The small models are ~50 MB and tuned for commands.
+**Use a bigger model.** The small model is ~50 MB and tuned for commands.
 Download a larger one from
 [alphacephei.com/vosk/models](https://alphacephei.com/vosk/models) and point at
 it:
@@ -202,15 +190,9 @@ The engine it picked is printed first. If it says `none`:
 sudo apt install espeak-ng
 ```
 
-**It speaks English but not Hindi.** espeak-ng needs its Hindi voice:
-
-```bash
-espeak-ng -v hi "नमस्ते"
-```
-
 **I cannot understand a word of it.** espeak-ng is a formant synthesiser; it is
-tiny and instant and speaks Hindi, which is why it is the fallback, but plenty
-of people cannot follow it. Piper sounds like a person:
+tiny and instant, which is why it is the fallback, but plenty of people
+cannot follow it. Piper sounds like a person:
 
 ```bash
 pip install piper-tts
@@ -224,8 +206,7 @@ Then switch to it in Settings → Speech output, or:
 "voice": { "engine": "piper" }
 ```
 
-Voices are about 60 MB each and are fetched on first use. English and Hindi are
-chosen automatically per reply.
+The voice is about 60 MB and is fetched on first use.
 
 **Still hard to follow but not that bad.** Slow it down — the default is 145
 words per minute and lower helps:

@@ -17,21 +17,6 @@ In `offline` mode, no. In `hybrid`, only when Vosk's confidence falls below
 If this matters to you, set `"mode": "offline"` and stop wondering. See
 [Security Model → Privacy](Security-Model#privacy).
 
-### Does it really understand Hinglish?
-
-Yes, and not by detecting the language first. When whisper.cpp is installed
-(`blackvoice setup --whisper`) it transcribes the whole sentence with one
-vocabulary that covers both scripts, so *"Black, firefox kholo"* comes back as
-one sentence rather than two guesses to reconcile.
-
-Without whisper.cpp, the fallback is two Vosk models racing on the same audio,
-one English and one Hindi, and the more confident result wins. That is a
-weaker trick — a Vosk model can only emit words from its own lexicon, so on a
-sentence that switches language halfway neither model has the whole thing, and
-picking the more confident wrong half is not a fix. It is why whisper.cpp is
-worth installing if Hinglish is how you actually talk to it: see [Why not just
-Vosk?](#why-not-just-vosk) below.
-
 ### Will it run on Windows or macOS?
 
 No. It is Linux-only by design — the system commands, desktop integration and
@@ -49,13 +34,14 @@ restricted Vosk grammar — deciding only between the wake phrases and
 tool. `blackvoice setup --whisper` fetches a small
 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) model; once it is
 there, `speech.engine: "auto"` (the default) uses it to transcribe whatever
-was said between the wake word and the silence that ends the utterance, with
-Vosk's two-model race kept as the fallback when whisper.cpp is not installed
-or fails. It is a native binary run as a subprocess, the same arrangement
-Piper already uses for speech output, rather than a Python package — the
-libraries a Python Whisper binding would need (`ctranslate2`, `onnxruntime`)
-ship one build per Python version, which does not survive a distribution
-upgrading its system Python the way the `.deb`/`.rpm` packages need to.
+was said between the wake word and the silence that ends the utterance,
+because it is simply more accurate than Vosk, with Vosk kept as the fallback
+when whisper.cpp is not installed or fails. It is a native binary run as a
+subprocess, the same arrangement Piper already uses for speech output, rather
+than a Python package — the libraries a Python Whisper binding would need
+(`ctranslate2`, `onnxruntime`) ship one build per Python version, which does
+not survive a distribution upgrading its system Python the way the
+`.deb`/`.rpm` packages need to.
 
 So: Vosk for streaming keyword-spotting, whisper.cpp for one-shot
 transcription of what was actually said. Using Vosk for both was the earlier
@@ -193,17 +179,14 @@ blackvoice voice
 blackvoice setup --piper    # fetch the binary right now, rather than on next run
 ```
 
-If Piper *is* the engine and it still sounds wrong, the likely cause is not
-Piper itself: a Hinglish or Hindi reply written in Roman script (no Devanagari
-at all — the AI backend does this deliberately, matching how the question was
-asked) used to be routed to the English voice, which guesses at pronunciations
-it was never trained on. That is fixed by detecting common romanised Hindi
-words, not by anything voice-related — see [Configuration](Configuration#voice--speech-output).
+If Piper *is* the engine and it still sounds wrong, see
+[Configuration](Configuration#voice--speech-output) for the other voice
+settings — rate, volume, and which `.onnx` file is used.
 
 ### Is it production ready?
 
 Version 0.6.1. The command routing, safety guard, configuration and skill layers
-have 473 tests. The audio path needs a real machine with a microphone to
+have 393 tests. The audio path needs a real machine with a microphone to
 exercise properly, so treat that as the least-proven part and report what breaks.
 
 ### How do I uninstall it?

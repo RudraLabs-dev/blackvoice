@@ -83,7 +83,7 @@ each gap. Run it first whenever something misbehaves.
 | `blackvoice` command | `~/.local/bin/blackvoice` |
 | Desktop entry and icon | `~/.local/share/applications`, `~/.local/share/icons` |
 | systemd user unit | `~/.config/systemd/user/blackvoice.service` |
-| Speech models (~90 MB) | `~/.local/share/blackvoice/models` |
+| Speech model (~40 MB) | `~/.local/share/blackvoice/models` |
 
 Nothing is installed system-wide except the distro packages, and those only when
 you pass `--system`.
@@ -93,7 +93,7 @@ you pass `--system`.
 ```bash
 ./install.sh              # Python side only; tells you what system packages are missing
 ./install.sh --system     # also installs the distro packages (needs sudo)
-./install.sh --no-models  # skip the ~90 MB model download
+./install.sh --no-models  # skip the ~40 MB model download
 ./install.sh --uninstall  # remove everything the installer created
 ```
 
@@ -176,7 +176,7 @@ SSH or on a server.
 ## Speech models
 
 **You do not normally have to do anything here.** On its first run Black Voice
-notices the models are missing and downloads them (~90 MB), reporting progress
+notices the model is missing and downloads it (~40 MB), reporting progress
 as it goes. It happens once.
 
 They cannot ship inside the `.deb` or `.rpm`. A package's post-install script
@@ -189,9 +189,7 @@ thing to expect.
 To fetch them yourself, or to re-fetch them:
 
 ```bash
-blackvoice setup                  # both languages
-blackvoice setup --language en    # English only
-blackvoice setup --language hi    # Hindi only
+blackvoice setup                  # fetches the English Vosk model
 blackvoice setup --force          # re-download
 ```
 
@@ -209,19 +207,16 @@ as they are:
 
 ```
 ~/.local/share/blackvoice/models/
-├── vosk-model-small-en-us-0.15/
-└── vosk-model-small-hi-0.22/
+└── vosk-model-small-en-us-0.15/
 ```
 
-You can point at bigger models by setting `speech.model_en` / `speech.model_hi`
-to an absolute path. See [Configuration](Configuration).
+You can point at a bigger model by setting `speech.model_en` to an absolute
+path. See [Configuration](Configuration).
 
-### Better Hinglish: whisper.cpp
+### Better accuracy: whisper.cpp
 
-The Vosk models above are enough to run. For a sentence that switches between
-Hindi and English mid-way — which two Vosk models racing on the same audio
-cannot really do, see [FAQ → Why not just
-Vosk?](FAQ#why-not-just-vosk) — install
+The Vosk model above is enough to run. For better accuracy than Vosk offers
+— see [FAQ → Why not just Vosk?](FAQ#why-not-just-vosk) — install
 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and fetch a model:
 
 ```bash

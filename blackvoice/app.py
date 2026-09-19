@@ -83,7 +83,7 @@ class Engine:
 
         self.wake = WakeWordDetector(
             self.config.wake,
-            self.config.model_path(self._wake_language()),
+            self.config.model_path(),
             self.config.audio.sample_rate,
         )
 
@@ -98,18 +98,6 @@ class Engine:
         self._pending: Optional[PendingConfirmation] = None
         self._lock = threading.RLock()
         self._thread: Optional[threading.Thread] = None
-
-    def _wake_language(self) -> str:
-        """Which Vosk model the wake word is spotted in.
-
-        wake.language wins when set; otherwise this follows speech.language,
-        so a Hindi-primary install spots "black" in its own Hindi model
-        instead of one that was always English regardless of configuration.
-        "both" maps to "en": the wake grammar needs exactly one model, and the
-        configured wake phrases are Roman script either way.
-        """
-        language = self.config.wake.language or self.config.speech.language
-        return "en" if language == "both" else language
 
     # ------------------------------------------------------------- state
     @property
@@ -378,35 +366,12 @@ class Engine:
         finally:
             self._set_state(State.IDLE)
 
-    def _notify_offline_engine_gap(self) -> None:
-        """Say once, on first run, what today only 'blackvoice doctor' would say.
-
-        whisper.cpp cannot be auto-installed - its latest GitHub release ships
-        no binary asset at all, and no stable distribution packages it either -
-        so unlike the AI backend or (once installed) the Piper voice, the fix
-        here is discoverability rather than automation. The one combination
-        worth interrupting first run for is the one HybridSTT's own docstring
-        calls out: two monolingual Vosk models cannot produce a sentence that
-        needs words from both, so "both" plus Vosk-only silently loses half of
-        any Hinglish sentence with nothing in the transcript to suggest why.
-        """
-        if self.stt.offline_engine != "vosk" or self.config.speech.language != "both":
-            return
-        self.bus.publish(
-            Topic.REPLY, speech="", ok=True,
-            display="Recognising Hindi and English as two separate models: a "
-                     "sentence that switches partway between them will lose "
-                     "half of itself. 'blackvoice setup --whisper' installs a "
-                     "single model that handles both together.",
-        )
-
     # -------------------------------------------------------- audio loop
     def _loop(self) -> None:
         self.ensure_models()
         self.ensure_ai_backend()
         self.ensure_tts_backend()
         self.stt.load()
-        self._notify_offline_engine_gap()
         wake_ready = self.wake.load()
         if not wake_ready:
             log.warning(

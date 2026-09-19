@@ -13,7 +13,6 @@ def test_defaults_are_sane() -> None:
     cfg = Config()
     assert cfg.audio.sample_rate == 16000
     assert cfg.speech.mode == "hybrid"
-    assert cfg.speech.language == "both"
     assert cfg.wake.enabled is True
     assert "black" in cfg.wake.phrases
     assert cfg.safety.confirm_shell is True
@@ -103,9 +102,8 @@ def test_bad_env_value_is_ignored(tmp_path, monkeypatch, capsys) -> None:
 def test_model_path_resolution(tmp_path) -> None:
     """A bare name resolves under the models dir; an absolute path is used as-is."""
     cfg = Config()
-    assert cfg.model_path("en").name == cfg.speech.model_en
-    assert cfg.model_path("hi").name == cfg.speech.model_hi
+    assert cfg.model_path().name == cfg.speech.model_en
 
     custom = tmp_path / "custom-en"
     cfg.speech.model_en = str(custom)
-    assert cfg.model_path("en") == custom
+    assert cfg.model_path() == custom

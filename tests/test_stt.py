@@ -114,8 +114,8 @@ def _hybrid(whisper=None, recognizers=(), mode: str = "offline") -> HybridSTT:
 # output parsing
 # --------------------------------------------------------------------------- #
 def test_clean_strips_timestamps() -> None:
-    stdout = "[00:00:00.000 --> 00:00:02.000]   firefox kholo\n"
-    assert WhisperCppRecognizer._clean(stdout) == "firefox kholo"
+    stdout = "[00:00:00.000 --> 00:00:02.000]   open firefox\n"
+    assert WhisperCppRecognizer._clean(stdout) == "open firefox"
 
 
 def test_clean_drops_non_speech_annotations() -> None:
@@ -138,12 +138,8 @@ def test_sentence_punctuation_is_dropped() -> None:
     """Whisper writes prose; a trailing stop defeats every $-anchored rule."""
     assert WhisperCppRecognizer._clean("Open Firefox.") == "Open Firefox"
     assert WhisperCppRecognizer._clean("volume 40.") == "volume 40"
-    assert WhisperCppRecognizer._clean("kya time hai?") == "kya time hai"
+    assert WhisperCppRecognizer._clean("what time is it?") == "what time is it"
     assert WhisperCppRecognizer._clean("stop!") == "stop"
-
-
-def test_the_devanagari_danda_is_dropped() -> None:
-    assert WhisperCppRecognizer._clean("\u0938\u094b \u091c\u093e\u0913\u0964") == "\u0938\u094b \u091c\u093e\u0913"
 
 
 def test_a_decimal_point_survives() -> None:
@@ -199,13 +195,13 @@ def test_argv_carries_the_essentials(recognizer) -> None:
     assert argv[0] == "whisper-cli"
     assert "--no-timestamps" in argv
     assert argv[argv.index("--file") + 1] == "/tmp/x.wav"
-    assert argv[argv.index("--language") + 1] == "auto"
+    assert argv[argv.index("--language") + 1] == "en"
     assert argv[argv.index("--model") + 1] == str(recognizer.model_path)
 
 
 def test_the_command_vocabulary_is_passed_as_a_prompt(recognizer) -> None:
     argv = recognizer._argv("/tmp/x.wav")
-    assert "firefox kholo" in argv[argv.index("--prompt") + 1]
+    assert "open firefox" in argv[argv.index("--prompt") + 1]
 
 
 def test_an_empty_prompt_is_omitted(recognizer) -> None:
@@ -221,25 +217,21 @@ def test_threads_only_when_asked_for(recognizer) -> None:
 
 
 def test_a_forced_language_is_honoured(recognizer) -> None:
-    recognizer.speech.whisper_language = "hi"
+    recognizer.speech.whisper_language = "fr"
     argv = recognizer._argv("/tmp/x.wav")
-    assert argv[argv.index("--language") + 1] == "hi"
+    assert argv[argv.index("--language") + 1] == "fr"
 
 
 # --------------------------------------------------------------------------- #
 # transcribing
 # --------------------------------------------------------------------------- #
 def test_transcribe_returns_the_text(monkeypatch, recognizer) -> None:
-    _stub_run(monkeypatch, _Completed(stdout=b" firefox kholo \n"))
+    _stub_run(monkeypatch, _Completed(stdout=b" open firefox \n"))
     result = recognizer.transcribe(b"\x01\x02" * 800)
-    assert result.text == "firefox kholo"
+    assert result.text == "open firefox"
     assert result.source == "whisper"
     assert result.confidence > 0
-
-
-def test_devanagari_is_reported_as_hindi(monkeypatch, recognizer) -> None:
-    _stub_run(monkeypatch, _Completed(stdout="फायरफॉक्स खोलो".encode("utf-8")))
-    assert recognizer.transcribe(b"\x01\x02" * 800).language == "hi"
+    assert result.language == "en"
 
 
 def test_a_nonzero_exit_yields_nothing(monkeypatch, recognizer) -> None:
@@ -305,12 +297,12 @@ def test_wav_bytes_round_trip(tmp_path) -> None:
 # tiering
 # --------------------------------------------------------------------------- #
 def test_whisper_wins_when_it_has_an_answer() -> None:
-    whisper = _FakeWhisper("firefox kholo")
-    vosk = _FakeVosk("firefox hollow", confidence=0.99)
+    whisper = _FakeWhisper("open firefox")
+    vosk = _FakeVosk("open fire fox", confidence=0.99)
     stt = _hybrid(whisper, [vosk])
 
     result = stt.transcribe_pcm(b"\x01\x02" * 800)
-    assert result.text == "firefox kholo"
+    assert result.text == "open firefox"
     assert result.source == "whisper"
     # A high Vosk confidence must not outrank it: the scores share no scale.
     assert vosk.calls == 0
@@ -327,14 +319,14 @@ def test_an_empty_whisper_result_falls_through_to_vosk() -> None:
 
 
 def test_vosk_alone_still_races_on_confidence() -> None:
-    quiet = _FakeVosk("firefox hollow", confidence=0.3)
+    quiet = _FakeVosk("open fire fox", confidence=0.3)
     loud = _FakeVosk("open firefox", confidence=0.8)
     stt = _hybrid(None, [quiet, loud])
     assert stt.transcribe_pcm(b"\x01\x02" * 800).text == "open firefox"
 
 
 def test_online_mode_skips_whisper() -> None:
-    whisper = _FakeWhisper("firefox kholo")
+    whisper = _FakeWhisper("open firefox")
     stt = _hybrid(whisper, [], mode="online")
     stt.online = type("_None", (), {"transcribe": staticmethod(lambda pcm: None)})()
 
@@ -357,7 +349,7 @@ def test_has_offline_counts_whisper() -> None:
 # listen_once: the full capture loop, with the calibrated Endpointer wired in
 # --------------------------------------------------------------------------- #
 def test_listen_once_stops_on_trailing_silence_and_transcribes() -> None:
-    stt = _hybrid(_FakeWhisper("firefox kholo"), [], mode="offline")
+    stt = _hybrid(_FakeWhisper("open firefox"), [], mode="offline")
     stt.audio.calibrate_noise = False
     stt.audio.silence_threshold = 0.02
     stt.audio.silence_timeout = 0.3
@@ -366,7 +358,7 @@ def test_listen_once_stops_on_trailing_silence_and_transcribes() -> None:
     mic = _FakeMicrophone(blocks)
 
     result = stt.listen_once(mic)
-    assert result.text == "firefox kholo"
+    assert result.text == "open firefox"
 
 
 def test_listen_once_reports_nothing_when_only_silence_was_heard() -> None:
@@ -384,7 +376,7 @@ def test_listen_once_survives_periodic_ambient_blips() -> None:
     """The same regression :mod:`tests.test_mic` covers directly, exercised
     through the real capture loop end to end.
     """
-    stt = _hybrid(_FakeWhisper("firefox kholo"), [], mode="offline")
+    stt = _hybrid(_FakeWhisper("open firefox"), [], mode="offline")
     stt.audio.calibrate_noise = False
     stt.audio.silence_threshold = 0.02
     stt.audio.silence_timeout = 0.4
@@ -397,4 +389,4 @@ def test_listen_once_survives_periodic_ambient_blips() -> None:
     mic = _FakeMicrophone(blocks)
 
     result = stt.listen_once(mic)
-    assert result.text == "firefox kholo"
+    assert result.text == "open firefox"

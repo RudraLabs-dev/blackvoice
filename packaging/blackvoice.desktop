@@ -3,13 +3,13 @@ Type=Application
 Version=1.0
 Name=Black Voice
 GenericName=Voice Assistant
-Comment=Offline-first voice assistant for Linux (Hindi and English) — a Rudra Labs product
+Comment=Offline-first voice assistant for Linux — a Rudra Labs product
 Exec=@BIN@
 TryExec=@BIN@
 Icon=blackvoice
 Terminal=false
 Categories=Utility;Accessibility;AudioVideo;
-Keywords=voice;assistant;speech;recognition;hindi;awaaz;
+Keywords=voice;assistant;speech;recognition;
 StartupNotify=false
 # Matches the WM_CLASS Qt sets from setDesktopFileName, so the dock can pair
 # the running window with this entry and show the right icon.

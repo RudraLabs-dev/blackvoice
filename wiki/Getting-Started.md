@@ -58,8 +58,8 @@ The tray icon and the overlay both show what Black Voice is doing:
 | `speaking` | Talking back |
 | `asleep` | Ignoring the wake word until you ask it to wake up |
 
-Say **“go to sleep”** or **“so jao”** to stop it listening; click the tray icon
-to wake it again.
+Say **“go to sleep”** to stop it listening; click the tray icon to wake it
+again.
 
 ## Your first commands
 
@@ -76,13 +76,11 @@ Then something that does work:
 
 ```
 black, open firefox
-black, firefox kholo
 black, volume 40
 black, screenshot
 ```
 
-Hindi, English and a mixture all work for everything. See
-**[Voice Commands](Voice-Commands)** for the full list, or just say:
+See **[Voice Commands](Voice-Commands)** for the full list, or just say:
 
 ```
 black, help
@@ -98,9 +96,9 @@ Anything that could change your system asks first:
   you    yes
 ```
 
-“Yes”, “haan”, “ok” and “theek hai” all confirm. “No”, “nahi”, “stop” and
-“ruko” all cancel. A confirmation expires after 30 seconds, and saying anything
-else cancels it — so an ignored prompt never fires later by accident.
+“Yes” and “ok” both confirm. “No” and “stop” both cancel. A confirmation
+expires after 30 seconds, and saying anything else cancels it — so an ignored
+prompt never fires later by accident.
 
 Read **[Security Model](Security-Model)** to see exactly which commands ask,
 which run straight away, and which are refused outright.

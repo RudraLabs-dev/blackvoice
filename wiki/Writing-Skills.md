@@ -51,11 +51,9 @@ In `blackvoice/nlu/intents.py`, add to `RULES`:
 ```python
 Rule("coffee_add", "coffee", "add", [
     r"\b(?:i\s+)?(?:had|drank)\s+(?:a\s+)?(?:cup\s+of\s+)?coffee\b",
-    r"\b(?:coffee|chai)\s*(?:pi\s*li|piya)\b",
 ]),
 Rule("coffee_count", "coffee", "count", [
     r"\bhow\s+(?:much|many)\s+coffee\b",
-    r"\bkitni\s+coffee\b",
 ]),
 ```
 
@@ -260,42 +258,33 @@ def test_counting(ctx: SkillContext) -> None:
     assert "2 cups" in reply.speech
 ```
 
-Add routing cases to `tests/test_router.py` too, including the Hindi phrasings:
+Add routing cases to `tests/test_router.py` too, covering the phrasings your
+patterns are meant to catch:
 
 ```python
 ("i had a coffee", "coffee", "add", {}),
-("coffee pi li", "coffee", "add", {}),
+("how many coffee", "coffee", "count", {}),
 ```
 
 ```bash
 pytest -q
 ```
 
-## Writing bilingual patterns
+## Reusable pattern fragments
 
-The English Vosk model romanises; the Hindi model emits Devanagari. Carry both:
-
-```python
-r"\b(?:awaaz|आवाज़|आवाज)\s*badha(?:o|do)?\b"
-```
-
-Reusable fragments live at the top of `intents.py` — `_OPEN`, `_CLOSE`,
+Common verb forms live at the top of `intents.py` — `_OPEN`, `_CLOSE`,
 `_INCREASE`, `_DECREASE`, `_WHAT`. Use them rather than re-spelling every verb
 form:
 
 ```python
-rf"\b(?:coffee|chai)\s*{_INCREASE}\b"
+rf"\b(?:coffee)\s*{_INCREASE}\b"
 ```
-
-Hindi verbs vary by politeness and gender — `karo`, `kar do`, `kariye`, `karna`.
-`kar(?:o|do|iye|na)?` covers most of it.
 
 ## Checklist
 
 - [ ] Skill class with a unique `name`
 - [ ] A `_do_<action>` method per action
 - [ ] Rules added, in the right place in the list
-- [ ] Both languages covered
 - [ ] Registered in `Engine.__init__`
 - [ ] `which()` probes for every external tool
 - [ ] Useful error messages
