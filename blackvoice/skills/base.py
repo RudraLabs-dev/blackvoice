@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from ..config import Config
@@ -93,7 +94,15 @@ class Skill(ABC):
 
     @staticmethod
     def spawn(argv) -> bool:
-        """Launch a GUI program and detach from it."""
+        """Launch a GUI program and detach from it.
+
+        Pinned to the user's home directory rather than inheriting whatever
+        this engine process happens to be running from - a terminal opened
+        by voice has no business starting in wherever blackvoice itself was
+        launched from (its own data directory, if that is where a systemd
+        unit or a manual `cd` left the working directory), and a user has no
+        way to tell that apart from the assistant actually reporting a path.
+        """
         log.debug("spawning %s", argv)
         try:
             subprocess.Popen(
@@ -102,6 +111,7 @@ class Skill(ABC):
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,
+                cwd=str(Path.home()),
             )
             return True
         except (OSError, ValueError):

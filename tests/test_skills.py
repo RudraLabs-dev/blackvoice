@@ -163,6 +163,27 @@ def test_ollama_missing_and_ollama_stopped_read_differently(monkeypatch) -> None
     assert "ollama serve" in stopped
 
 
+# --------------------------------------------------------------------------- #
+# Skill.spawn: a launched app must never inherit blackvoice's own working
+# directory (its own data dir, if that is where a systemd unit or a manual
+# `cd` left it) - a real machine reported "open terminal" opening a new
+# terminal inside ~/.local/share/blackvoice/piper/, which reads exactly like
+# the assistant reporting a path, when it is really just an inherited cwd.
+# --------------------------------------------------------------------------- #
+def test_spawn_pins_the_working_directory_to_home(monkeypatch, tmp_path) -> None:
+    from pathlib import Path
+
+    calls = []
+    monkeypatch.setattr(
+        "blackvoice.skills.base.subprocess.Popen",
+        lambda argv, **kwargs: calls.append(kwargs) or object(),
+    )
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+    assert Skill.spawn(["gnome-terminal"]) is True
+    assert calls[0]["cwd"] == str(tmp_path)
+
+
 def test_commands_work_without_any_ai_backend(ctx: SkillContext) -> None:
     """Ollama is optional: only free-form questions need a backend."""
     from blackvoice.app import Engine
