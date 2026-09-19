@@ -56,9 +56,13 @@ class _FakeProc:
         self.argv = argv
         self.stdin = _FakeStream()
         self.stdout = _FakeStream()
+        self.returncode = 0
 
     def wait(self, timeout=None) -> int:
         return 0
+
+    def kill(self) -> None:
+        pass
 
 
 @pytest.fixture

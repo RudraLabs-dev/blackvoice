@@ -230,15 +230,33 @@ class Speaker:
             piper.stdout.close()
         piper.stdin.write(text.encode("utf-8"))
         piper.stdin.close()
+
+        # Waited on separately (piper first, then the player) rather than
+        # only timing the pair together, so a slow reply's log says which
+        # half is actually slow: piper synthesising the WAV, or the player
+        # writing it to the audio device - "12 seconds either way" gave no
+        # way to tell those apart.
+        try:
+            piper.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            piper.kill()
+        synthesised = time.monotonic()
+        log.debug(
+            "piper synthesis took %.2fs (exit code %s)",
+            synthesised - started, piper.returncode,
+        )
+
         try:
             self._proc.wait(timeout=60)
         except subprocess.TimeoutExpired:
             self._proc.kill()
         finally:
-            piper.wait(timeout=5)
             with self._lock:
                 self._proc = None
-            log.debug("piper+player took %.2fs", time.monotonic() - started)
+            log.debug(
+                "playback took %.2fs (%.2fs total)",
+                time.monotonic() - synthesised, time.monotonic() - started,
+            )
 
     def _speak_espeak(self, text: str) -> None:
         binary = _which("espeak-ng") or _which("espeak")
