@@ -226,20 +226,30 @@ class Speaker:
             log.warning("no audio player found for piper output")
             return
 
-        argv = [binary, "--model", model]
+        # "-" for stdout is honoured by both CLI flavours - confirmed by
+        # reading piper-tts's own argparse handling, not assumed - so this
+        # is never conditional. Leaving --output_file out entirely was tried
+        # and was wrong: with neither --output-file nor --output-dir, this
+        # CLI plays the audio itself via ffplay when available, or else
+        # writes a literal ./output.wav - either way nothing reaches our
+        # own player on stdout.
+        argv = [binary, "--model", model, "--output_file", "-"]
         if _piper_supports_espeak_data(binary):
-            # The legacy rhasspy/piper CLI: "-" for stdout is its own
-            # convention, and phonemising anything but the plainest English
-            # needs --espeak_data - a relative lookup would depend on the
-            # assistant's current working directory, which nothing here
-            # guarantees.
-            argv += ["--output_file", "-"]
+            # The legacy rhasspy/piper CLI. Phonemising anything but the
+            # plainest English needs this, and a relative lookup would
+            # depend on the assistant's current working directory, which
+            # nothing here guarantees.
             data_dir = piper_install.espeak_data_dir()
             if data_dir:
                 argv += ["--espeak_data", str(data_dir)]
-        # else: the modern piper-tts (piper1-gpl) CLI - leaving
-        # --output-file out entirely is how *it* asks for stdout, and it has
-        # no --espeak_data equivalent to pass.
+        # else: the modern piper-tts (piper1-gpl) CLI has no --espeak_data
+        # equivalent - and critically, passing it one anyway is not a no-op:
+        # argparse.parse_known_args() does not reject an unrecognised flag,
+        # it collects it, and this CLI's own fallback then joins *all*
+        # unrecognised arguments together and speaks *that* instead of ever
+        # reading stdin. That - not the reply pipeline, which was never at
+        # fault - is what made a real machine read out the espeak-ng-data
+        # path instead of the reply it was actually given.
 
         log.debug("piper argv: %s", argv)
         started = time.monotonic()

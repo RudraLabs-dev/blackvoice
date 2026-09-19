@@ -165,19 +165,24 @@ def test_an_unprobeable_binary_assumes_legacy_rather_than_guessing_wrong(monkeyp
     assert tts_mod._piper_supports_espeak_data("/does/not/exist") is True
 
 
-def test_speak_piper_omits_incompatible_flags_for_the_modern_cli(monkeypatch, piper_speaker) -> None:
-    """The actual bug this was all chasing: --output_file - and
-    --espeak_data sent to a piper-tts (piper1-gpl) binary instead of the
-    legacy CLI that understands them.
+def test_speak_piper_omits_only_espeak_data_for_the_modern_cli(monkeypatch, piper_speaker) -> None:
+    """The actual bug this was all chasing, confirmed by reading piper-tts's
+    own source: --output_file - is honoured by *both* CLI flavours (a wrong
+    first guess here briefly broke audio entirely - piper-tts with no
+    --output-file either plays audio itself via ffplay or writes
+    ./output.wav, never stdout). --espeak_data is the real mismatch: passed
+    to piper-tts, argparse.parse_known_args() does not reject it - the CLI's
+    own fallback then joins *all* unrecognised arguments into the text to
+    speak and never reads stdin at all, which is what actually made a real
+    machine read out the espeak-ng-data path instead of the reply.
     """
     monkeypatch.setattr(tts_mod, "_piper_supports_espeak_data", lambda binary: False)
 
     piper_speaker._speak_piper("hello")
 
     piper_argv = piper_speaker._popen_calls[0]
-    assert "--output_file" not in piper_argv
     assert "--espeak_data" not in piper_argv
-    assert piper_argv == ["/opt/piper/piper", "--model", "/voices/en_US.onnx"]
+    assert piper_argv == ["/opt/piper/piper", "--model", "/voices/en_US.onnx", "--output_file", "-"]
 
 
 # --------------------------------------------------------------------------- #
