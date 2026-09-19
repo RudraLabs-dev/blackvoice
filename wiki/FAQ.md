@@ -202,7 +202,7 @@ words, not by anything voice-related — see [Configuration](Configuration#voice
 
 ### Is it production ready?
 
-Version 0.6.0. The command routing, safety guard, configuration and skill layers
+Version 0.6.1. The command routing, safety guard, configuration and skill layers
 have 473 tests. The audio path needs a real machine with a microphone to
 exercise properly, so treat that as the least-proven part and report what breaks.
 

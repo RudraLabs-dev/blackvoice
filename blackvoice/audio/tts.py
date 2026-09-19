@@ -262,8 +262,15 @@ class Speaker:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
-        play_args = [player, "-r", "22050", "-f", "S16_LE", "-t", "raw", "-"] \
-            if player.endswith("aplay") else [player, "-"]
+        # --output_file - still writes a complete WAV file (RIFF header and
+        # all) to stdout, not headerless raw PCM - confirmed by inspecting
+        # the actual bytes. Telling aplay to expect raw S16_LE at a hardcoded
+        # 22050 Hz used to make it play the 44-byte header as if it were
+        # audio, and would have played the wrong pitch/speed entirely for any
+        # Piper voice whose native rate is not 22050 Hz. Every one of these
+        # players auto-detects a WAV stream from its header, so the fix is to
+        # simply stop telling them what to expect.
+        play_args = [player, "-"]
         with self._lock:
             self._proc = subprocess.Popen(
                 play_args,

@@ -16,7 +16,9 @@ from __future__ import annotations
 import pytest
 
 from blackvoice import piper_install
-from blackvoice.audio.tts import _looks_hindi, detect_engine
+from blackvoice.audio import tts as tts_mod
+from blackvoice.audio.tts import Speaker, _looks_hindi, detect_engine
+from blackvoice.config import VoiceConfig
 
 
 # --------------------------------------------------------------------------- #
@@ -33,6 +35,83 @@ def test_detect_engine_falls_back_when_piper_is_missing(monkeypatch) -> None:
     monkeypatch.setattr(piper_install, "find_binary", lambda: None)
     monkeypatch.setattr("blackvoice.audio.tts._which", lambda name: "/usr/bin/espeak-ng" if "espeak" in name else None)
     assert detect_engine() == "espeak"
+
+
+# --------------------------------------------------------------------------- #
+# _speak_piper: the player must be handed the WAV stream as-is, not told to
+# expect headerless raw PCM.
+#
+# `piper --output_file -` writes a complete WAV file - RIFF header and all -
+# to stdout, confirmed by inspecting the actual bytes on a real machine. The
+# previous code told aplay to expect raw S16_LE at a hardcoded 22050 Hz,
+# which played the 44-byte header as if it were audio and would have played
+# the wrong pitch and speed entirely for any Piper voice whose native rate is
+# not 22050 Hz. Every player this project shells out to (aplay, paplay,
+# pw-play) auto-detects a WAV stream from its own header, so the fix is to
+# stop overriding that.
+# --------------------------------------------------------------------------- #
+class _FakeStream:
+    def __init__(self) -> None:
+        self.closed = False
+        self.written = b""
+
+    def write(self, data: bytes) -> None:
+        self.written += data
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeProc:
+    def __init__(self, argv, **kwargs) -> None:
+        self.argv = argv
+        self.stdin = _FakeStream()
+        self.stdout = _FakeStream()
+
+    def wait(self, timeout=None) -> int:
+        return 0
+
+
+@pytest.fixture
+def piper_speaker(monkeypatch):
+    monkeypatch.setattr(tts_mod, "_which", lambda name: "/usr/bin/aplay" if name == "aplay" else None)
+    monkeypatch.setattr(piper_install, "find_binary", lambda: "/opt/piper/piper")
+    monkeypatch.setattr(piper_install, "espeak_data_dir", lambda: None)
+
+    speaker = Speaker(VoiceConfig(engine="piper"))
+    monkeypatch.setattr(speaker, "_piper_voice_for", lambda hindi: "/voices/en_US.onnx")
+
+    calls = []
+    monkeypatch.setattr(
+        tts_mod.subprocess, "Popen",
+        lambda argv, **k: calls.append(argv) or _FakeProc(argv, **k),
+    )
+    speaker._popen_calls = calls
+    yield speaker
+    speaker.shutdown()
+
+
+def test_the_player_is_given_no_format_hints(piper_speaker) -> None:
+    piper_speaker._speak_piper("hello")
+    player_argv = piper_speaker._popen_calls[1]
+    assert player_argv == ["/usr/bin/aplay", "-"]
+
+
+def test_the_player_still_reads_from_pipers_stdout(piper_speaker) -> None:
+    piper_speaker._speak_piper("hello")
+    piper_call_kwargs_argv = piper_speaker._popen_calls[0]
+    assert piper_call_kwargs_argv[0] == "/opt/piper/piper"
+
+
+def test_espeak_data_is_passed_when_available(monkeypatch, piper_speaker) -> None:
+    from pathlib import PurePosixPath
+
+    data_dir = PurePosixPath("/opt/piper/espeak-ng-data")
+    monkeypatch.setattr(piper_install, "espeak_data_dir", lambda: data_dir)
+    piper_speaker._speak_piper("hello")
+    piper_argv = piper_speaker._popen_calls[0]
+    assert "--espeak_data" in piper_argv
+    assert piper_argv[piper_argv.index("--espeak_data") + 1] == str(data_dir)
 
 
 # --------------------------------------------------------------------------- #
