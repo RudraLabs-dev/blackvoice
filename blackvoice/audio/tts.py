@@ -13,6 +13,7 @@ loop, and :meth:`Speaker.stop` cuts the current utterance off mid-word.
 
 from __future__ import annotations
 
+import functools
 import logging
 import queue
 import shutil
@@ -28,6 +29,37 @@ log = logging.getLogger(__name__)
 
 def _which(name: str) -> Optional[str]:
     return shutil.which(name)
+
+
+@functools.lru_cache(maxsize=8)
+def _piper_supports_espeak_data(binary: str) -> bool:
+    """Whether this ``piper`` build understands ``--espeak_data`` and treats
+    ``--output_file -`` as "write to stdout".
+
+    Two unrelated projects both install a program called ``piper`` on PATH.
+    The legacy `rhasspy/piper <https://github.com/rhasspy/piper>`_ binary -
+    what :mod:`blackvoice.piper_install` fetches - takes both. The modern
+    ``piper-tts`` PyPI package (``pip``/``pipx install piper-tts``, the
+    ``piper1-gpl`` rewrite) does not: confirmed live against a real
+    ``pipx``-installed copy, its ``--help`` has no ``--espeak_data`` at all,
+    and ``--output-file`` is a real file path with no "-" convention - it
+    defaults to stdout only when the flag is left out entirely. Get either
+    of those wrong against that build and it does not error out cleanly; it
+    still runs, just not on the text it was actually asked to speak - which
+    is what made this so confusing to chase from a report of "it reads out
+    a path" alone, with no indication the binary itself was the mismatch.
+
+    Detected once per binary path by asking it, rather than assumed either
+    way, since a future release of either project could change this.
+    """
+    try:
+        result = subprocess.run(
+            [binary, "--help"], capture_output=True, text=True, timeout=5
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return True  # can't tell; keep today's behaviour rather than guess
+    help_text = (result.stdout or "") + (result.stderr or "")
+    return "--espeak_data" in help_text or "--espeak-data" in help_text
 
 
 def detect_engine() -> str:
@@ -194,13 +226,20 @@ class Speaker:
             log.warning("no audio player found for piper output")
             return
 
-        argv = [binary, "--model", model, "--output_file", "-"]
-        data_dir = piper_install.espeak_data_dir()
-        if data_dir:
-            # Phonemising anything but the plainest English needs this, and a
-            # relative lookup would depend on the assistant's current working
-            # directory, which nothing here guarantees.
-            argv += ["--espeak_data", str(data_dir)]
+        argv = [binary, "--model", model]
+        if _piper_supports_espeak_data(binary):
+            # The legacy rhasspy/piper CLI: "-" for stdout is its own
+            # convention, and phonemising anything but the plainest English
+            # needs --espeak_data - a relative lookup would depend on the
+            # assistant's current working directory, which nothing here
+            # guarantees.
+            argv += ["--output_file", "-"]
+            data_dir = piper_install.espeak_data_dir()
+            if data_dir:
+                argv += ["--espeak_data", str(data_dir)]
+        # else: the modern piper-tts (piper1-gpl) CLI - leaving
+        # --output-file out entirely is how *it* asks for stdout, and it has
+        # no --espeak_data equivalent to pass.
 
         log.debug("piper argv: %s", argv)
         started = time.monotonic()

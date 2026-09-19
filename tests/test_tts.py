@@ -73,6 +73,10 @@ def piper_speaker(monkeypatch):
 
     speaker = Speaker(VoiceConfig(engine="piper"))
     monkeypatch.setattr(speaker, "_piper_voice_for", lambda: "/voices/en_US.onnx")
+    # These tests exercise the legacy rhasspy/piper CLI shape; the
+    # modern-piper-tts detection itself is covered separately below, with
+    # its own mocked --help probe.
+    monkeypatch.setattr(tts_mod, "_piper_supports_espeak_data", lambda binary: True)
 
     calls = []
     monkeypatch.setattr(
@@ -105,6 +109,75 @@ def test_espeak_data_is_passed_when_available(monkeypatch, piper_speaker) -> Non
     piper_argv = piper_speaker._popen_calls[0]
     assert "--espeak_data" in piper_argv
     assert piper_argv[piper_argv.index("--espeak_data") + 1] == str(data_dir)
+
+
+# --------------------------------------------------------------------------- #
+# _piper_supports_espeak_data: telling the legacy rhasspy/piper CLI apart
+# from the modern piper-tts (piper1-gpl) one - both install a program
+# called "piper", with incompatible argument sets, and getting this wrong
+# silently mis-speaks instead of erroring. Confirmed live against a real
+# pipx-installed piper-tts, whose --help has no --espeak_data at all.
+# --------------------------------------------------------------------------- #
+_MODERN_PIPER_HELP = """usage: piper [-h] -m MODEL [-c CONFIG] [-i INPUT_FILE] [-f OUTPUT_FILE] [-d OUTPUT_DIR]
+options:
+  -m, --model MODEL     Path to Onnx model file
+  -f, --output-file, --output_file OUTPUT_FILE
+                        Path to output WAV file (default: stdout)
+  --data-dir, --data_dir DATA_DIR
+                        Data directory to check for voice models (default: current directory)
+"""
+
+_LEGACY_PIPER_HELP = """usage: piper [-h] -m MODEL [-c CONFIG] [-f OUTPUT_FILE] [--espeak_data ESPEAK_DATA]
+options:
+  -m MODEL, --model MODEL
+  -f OUTPUT_FILE, --output_file OUTPUT_FILE
+  --espeak_data ESPEAK_DATA
+"""
+
+
+def test_the_modern_piper_tts_cli_is_detected_by_its_help_text(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tts_mod.subprocess, "run",
+        lambda argv, **k: tts_mod.subprocess.CompletedProcess(argv, 0, _MODERN_PIPER_HELP, ""),
+    )
+    tts_mod._piper_supports_espeak_data.cache_clear()
+    assert tts_mod._piper_supports_espeak_data("/home/x/.local/bin/piper") is False
+
+
+def test_the_legacy_piper_cli_is_detected_by_its_help_text(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tts_mod.subprocess, "run",
+        lambda argv, **k: tts_mod.subprocess.CompletedProcess(argv, 0, _LEGACY_PIPER_HELP, ""),
+    )
+    tts_mod._piper_supports_espeak_data.cache_clear()
+    assert tts_mod._piper_supports_espeak_data("/opt/blackvoice/piper/piper") is True
+
+
+def test_an_unprobeable_binary_assumes_legacy_rather_than_guessing_wrong(monkeypatch) -> None:
+    """Erring toward today's established behaviour when --help itself fails,
+    rather than toward the newer, less-tested code path.
+    """
+    def _boom(argv, **k):
+        raise FileNotFoundError(argv[0])
+
+    monkeypatch.setattr(tts_mod.subprocess, "run", _boom)
+    tts_mod._piper_supports_espeak_data.cache_clear()
+    assert tts_mod._piper_supports_espeak_data("/does/not/exist") is True
+
+
+def test_speak_piper_omits_incompatible_flags_for_the_modern_cli(monkeypatch, piper_speaker) -> None:
+    """The actual bug this was all chasing: --output_file - and
+    --espeak_data sent to a piper-tts (piper1-gpl) binary instead of the
+    legacy CLI that understands them.
+    """
+    monkeypatch.setattr(tts_mod, "_piper_supports_espeak_data", lambda binary: False)
+
+    piper_speaker._speak_piper("hello")
+
+    piper_argv = piper_speaker._popen_calls[0]
+    assert "--output_file" not in piper_argv
+    assert "--espeak_data" not in piper_argv
+    assert piper_argv == ["/opt/piper/piper", "--model", "/voices/en_US.onnx"]
 
 
 # --------------------------------------------------------------------------- #
