@@ -8,9 +8,13 @@ audio. Two shortcuts were checked and ruled out before writing this:
 - The PyPI ``piper-tts`` package (the ``piper1-gpl`` rewrite) ships
   ``cp39-abi3`` wheels, which sounds promising, but it depends on
   ``onnxruntime`` - already established elsewhere in this project as
-  unbundleable into ``/opt/blackvoice/lib`` - and it installs no ``piper``
-  console script on PATH at all; its interface is ``python3 -m piper``, not a
-  bare binary ``_speak_piper`` could ever call.
+  unbundleable into ``/opt/blackvoice/lib``. It *does* register a ``piper``
+  console script (``piper = piper.__main__:main``, confirmed against its
+  published wheel's ``entry_points.txt``) - which is exactly why a bare
+  ``pipx install piper-tts`` shadows this project's own fetch on PATH, and
+  why :func:`find_binary` cannot just trust anything named ``piper`` it
+  finds there: :mod:`blackvoice.audio.tts` has to tell the two CLIs apart by
+  their ``--help`` output before building an argv either one will accept.
 - The legacy `rhasspy/piper <https://github.com/rhasspy/piper>`_ repository,
   however, still publishes a plain binary archive per architecture as a real
   GitHub release asset - confirmed directly against the release API rather
