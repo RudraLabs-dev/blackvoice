@@ -110,6 +110,7 @@ class Speaker:
             text = self._queue.get()
             if text is None:
                 return
+            log.info("speaking (%s): %r", self.engine, text)
             self.speaking.set()
             try:
                 self._speak_now(text)
@@ -166,6 +167,7 @@ class Speaker:
         if voices.installed(name):
             return str(voices.voice_path(name))
 
+        log.warning("piper voice %r not found installed; may re-fetch it", name)
         if not self.cfg.piper_auto_download:
             return None
 
@@ -200,6 +202,8 @@ class Speaker:
             # directory, which nothing here guarantees.
             argv += ["--espeak_data", str(data_dir)]
 
+        log.debug("piper argv: %s", argv)
+        started = time.monotonic()
         piper = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE,
@@ -234,6 +238,7 @@ class Speaker:
             piper.wait(timeout=5)
             with self._lock:
                 self._proc = None
+            log.debug("piper+player took %.2fs", time.monotonic() - started)
 
     def _speak_espeak(self, text: str) -> None:
         binary = _which("espeak-ng") or _which("espeak")
