@@ -15,7 +15,24 @@ from __future__ import annotations
 
 import pytest
 
-from blackvoice.audio.tts import _looks_hindi
+from blackvoice import piper_install
+from blackvoice.audio.tts import _looks_hindi, detect_engine
+
+
+# --------------------------------------------------------------------------- #
+# detect_engine: Piper detection goes through piper_install now, not a bare
+# shutil.which("piper") - so a private, per-user install this project fetched
+# itself is found too, not just one already on PATH.
+# --------------------------------------------------------------------------- #
+def test_detect_engine_prefers_piper_when_installed(monkeypatch) -> None:
+    monkeypatch.setattr(piper_install, "find_binary", lambda: "/opt/piper/piper")
+    assert detect_engine() == "piper"
+
+
+def test_detect_engine_falls_back_when_piper_is_missing(monkeypatch) -> None:
+    monkeypatch.setattr(piper_install, "find_binary", lambda: None)
+    monkeypatch.setattr("blackvoice.audio.tts._which", lambda name: "/usr/bin/espeak-ng" if "espeak" in name else None)
+    assert detect_engine() == "espeak"
 
 
 # --------------------------------------------------------------------------- #

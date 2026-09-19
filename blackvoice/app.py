@@ -83,7 +83,7 @@ class Engine:
 
         self.wake = WakeWordDetector(
             self.config.wake,
-            self.config.model_path("en"),
+            self.config.model_path(self._wake_language()),
             self.config.audio.sample_rate,
         )
 
@@ -98,6 +98,18 @@ class Engine:
         self._pending: Optional[PendingConfirmation] = None
         self._lock = threading.RLock()
         self._thread: Optional[threading.Thread] = None
+
+    def _wake_language(self) -> str:
+        """Which Vosk model the wake word is spotted in.
+
+        wake.language wins when set; otherwise this follows speech.language,
+        so a Hindi-primary install spots "black" in its own Hindi model
+        instead of one that was always English regardless of configuration.
+        "both" maps to "en": the wake grammar needs exactly one model, and the
+        configured wake phrases are Roman script either way.
+        """
+        language = self.config.wake.language or self.config.speech.language
+        return "en" if language == "both" else language
 
     # ------------------------------------------------------------- state
     @property
@@ -306,11 +318,95 @@ class Engine:
         finally:
             self._set_state(State.IDLE)
 
+    def ensure_tts_backend(self) -> None:
+        """Get a natural-sounding voice ready with no manual step, when it can be.
+
+        Unlike ``ensure_ai_backend``'s Ollama, there is nothing to detect-and-
+        wake here - Piper has no server to be reachable or not, just a binary
+        that either exists or does not. So this does one thing: when nothing
+        found on PATH or in a previous private install, and
+        ``voice.piper_auto_install`` allows it (on by default - see the
+        config field's own docstring for why that differs from Ollama),
+        fetch one. Speaker already prefers Piper the instant its binary
+        exists (``detect_engine()``), so a successful install here just has
+        to tell the already-constructed Speaker to stop using whatever it
+        fell back to at startup.
+        """
+        if self.config.voice.engine not in ("auto", "piper"):
+            return
+        if not self.config.voice.piper_auto_install:
+            return
+
+        from . import piper_install
+
+        if piper_install.find_binary() is not None:
+            return
+
+        if self._install_piper(piper_install) and self.config.voice.engine == "auto":
+            self.speaker.engine = "piper"
+            log.info("switched to Piper now that it is installed")
+
+    def _install_piper(self, piper_install) -> Optional[str]:
+        """The auto_install path: fetch a private copy, report progress on the bus."""
+        self.bus.publish(
+            Topic.REPLY, speech="", ok=True,
+            display="First run: installing a natural-sounding voice (Piper, "
+                     "about 25 MB) so replies are spoken instead of read in a "
+                     "robotic one. This happens once - turn it off with "
+                     "voice.piper_auto_install: false.",
+        )
+
+        last_percent = -1
+
+        def _progress(status: str, done: int, total: int) -> None:
+            nonlocal last_percent
+            if status != "downloading" or not total:
+                return
+            percent = int(done * 100 / total)
+            if percent == last_percent:
+                return
+            last_percent = percent
+            self.bus.publish(Topic.STATE, state=State.SETUP, percent=percent, done=done, total=total)
+
+        self._set_state(State.SETUP)
+        try:
+            return piper_install.download_and_install(on_progress=_progress)
+        except piper_install.PiperError as exc:
+            log.warning("automatic Piper install failed: %s", exc)
+            self.bus.publish(Topic.REPLY, speech="", ok=False, display=str(exc))
+            return None
+        finally:
+            self._set_state(State.IDLE)
+
+    def _notify_offline_engine_gap(self) -> None:
+        """Say once, on first run, what today only 'blackvoice doctor' would say.
+
+        whisper.cpp cannot be auto-installed - its latest GitHub release ships
+        no binary asset at all, and no stable distribution packages it either -
+        so unlike the AI backend or (once installed) the Piper voice, the fix
+        here is discoverability rather than automation. The one combination
+        worth interrupting first run for is the one HybridSTT's own docstring
+        calls out: two monolingual Vosk models cannot produce a sentence that
+        needs words from both, so "both" plus Vosk-only silently loses half of
+        any Hinglish sentence with nothing in the transcript to suggest why.
+        """
+        if self.stt.offline_engine != "vosk" or self.config.speech.language != "both":
+            return
+        self.bus.publish(
+            Topic.REPLY, speech="", ok=True,
+            display="Recognising Hindi and English as two separate models: a "
+                     "sentence that switches partway between them will lose "
+                     "half of itself. 'blackvoice setup --whisper' installs a "
+                     "single model that handles both together.",
+        )
+
     # -------------------------------------------------------- audio loop
     def _loop(self) -> None:
         self.ensure_models()
         self.ensure_ai_backend()
+        self.ensure_tts_backend()
         self.stt.load()
+        self._notify_offline_engine_gap()
         wake_ready = self.wake.load()
         if not wake_ready:
             log.warning(

@@ -106,11 +106,32 @@ two-word trigger is much more reliable:
 
 ### It keeps listening after I stop
 
-Either the room is noisy or the threshold is too low:
+`audio.calibrate_noise` (on by default) should already fix most of this by
+itself: it measures your room's actual ambient noise for about a second at
+the start of each command and raises the effective threshold to clear it,
+rather than trusting one fixed number for every room. See what it computed
+for your room:
 
-```jsonc
-"audio": { "silence_threshold": 0.02 }
+```bash
+blackvoice mic
 ```
+
+That prints the configured floor next to the live calibrated threshold. If
+listening still runs long after that:
+
+- Lower `silence_timeout` — recognition now tests loudness several times a
+  second rather than once per half-second block, so it no longer needs the
+  padding older versions did:
+  ```jsonc
+  "audio": { "silence_timeout": 0.6 }
+  ```
+- A genuinely loud, constant background noise (a fan, traffic) can still
+  raise the calibrated threshold enough to miss quiet speech. Raise
+  `calibration_margin` if it is over-correcting, or turn calibration off and
+  set a fixed floor yourself if your room's noise is unusually inconsistent:
+  ```jsonc
+  "audio": { "calibrate_noise": false, "silence_threshold": 0.02 }
+  ```
 
 ---
 
@@ -125,8 +146,25 @@ blackvoice text "the exact phrase"
 If text mode does the right thing, recognition is the problem. If it does the
 wrong thing, the routing rules are — open an issue with the phrase.
 
-**Load one model instead of two.** Two models on the same audio is what makes
-Hinglish work, but a single one is more accurate for a single language:
+**Install whisper.cpp if `speech.language` is `"both"`.** This is the single
+biggest fix for Hinglish specifically. Without it, two separate Vosk models
+race on the same audio, and neither one has the other's vocabulary — on a
+sentence that switches language partway (*"black, chrome kholo aur volume kam
+karo"*), each model can only get its own half right, so the more confident
+guess still loses the other half. `blackvoice doctor` calls this out as a
+problem when it applies to your setup. Fix it with:
+
+```bash
+blackvoice setup --whisper
+```
+
+whisper.cpp is a native binary and a separate download, not a Python package
+— see [Configuration](Configuration#speech--recognition) for what
+`blackvoice doctor` and `blackvoice setup --whisper` actually check.
+
+**Load one model instead of two.** If installing whisper.cpp is not an
+option, two models on the same audio is what makes Hinglish work at all, but
+a single one is more accurate for a single language:
 
 ```jsonc
 "speech": { "language": "en" }

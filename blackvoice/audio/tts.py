@@ -37,7 +37,9 @@ def detect_engine() -> str:
     Piper is preferred because it is the only one that sounds like a person,
     but only when its binary exists - a configured voice is useless without it.
     """
-    if _which("piper"):
+    from .. import piper_install
+
+    if piper_install.find_binary():
         return "piper"
     if _which("espeak-ng") or _which("espeak"):
         return "espeak"
@@ -233,13 +235,29 @@ class Speaker:
             self.engine = "espeak" if (_which("espeak-ng") or _which("espeak")) else "none"
             return self._speak_now(text)
 
+        from .. import piper_install
+
+        binary = piper_install.find_binary()
+        if not binary:
+            log.warning("no piper binary available; falling back to espeak-ng")
+            self.engine = "espeak" if (_which("espeak-ng") or _which("espeak")) else "none"
+            return self._speak_now(text)
+
         player = _which("aplay") or _which("paplay") or _which("pw-play")
         if not player:
             log.warning("no audio player found for piper output")
             return
 
+        argv = [binary, "--model", model, "--output_file", "-"]
+        data_dir = piper_install.espeak_data_dir()
+        if data_dir:
+            # Phonemising anything but the plainest English needs this, and a
+            # relative lookup would depend on the assistant's current working
+            # directory, which nothing here guarantees.
+            argv += ["--espeak_data", str(data_dir)]
+
         piper = subprocess.Popen(
-            ["piper", "--model", model, "--output_file", "-"],
+            argv,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,

@@ -126,7 +126,8 @@ ran.
   "enabled": true,
   "phrases": ["black", "blek", "blak"],
   "hotkey": "Ctrl+Alt+Space",
-  "chime": true
+  "chime": true,
+  "language": ""
 }
 ```
 
@@ -136,6 +137,7 @@ ran.
 | `phrases` | three spellings of “black” | Anything in this list activates it. The extra spellings catch how the recogniser writes the word. |
 | `hotkey` | `Ctrl+Alt+Space` | **Display only.** Black Voice does not grab keys — bind this in your desktop's keyboard settings. |
 | `chime` | `true` | Short beep when it starts listening. |
+| `language` | *(blank)* | Which Vosk model spots the wake word — `en` or `hi`. Blank follows `speech.language` (`"both"` maps to `en`). Set this only if the wake word itself is said in Hindi on a Hindi-primary install; before this existed it was silently always English regardless of `speech.language`. |
 
 ### False triggers
 
@@ -155,44 +157,77 @@ it off. A two-word trigger is far more reliable:
   "block_size": 8000,
   "input_device": null,
   "silence_threshold": 0.012,
-  "silence_timeout": 1.2,
-  "max_command_seconds": 12.0
+  "silence_timeout": 0.8,
+  "max_command_seconds": 12.0,
+  "calibrate_noise": true,
+  "calibration_seconds": 1.0,
+  "calibration_margin": 1.6
 }
 ```
 
 | Key | Default | What it does |
 |---|---|---|
 | `input_device` | `null` | System default. Use `blackvoice devices` to find an index. |
-| `silence_threshold` | `0.012` | Loudness below this counts as silence. Raise it in a noisy room, lower it if quiet speech gets cut off. |
-| `silence_timeout` | `1.2` | Seconds of silence that end a command. Raise it if it cuts you off mid-sentence. |
+| `silence_threshold` | `0.012` | A floor, not the last word: with `calibrate_noise` on, the level actually used while listening is raised above this to match the room. Run `blackvoice mic` to see both numbers for yours. |
+| `silence_timeout` | `0.8` | Seconds of silence that end a command. Lower than it used to be — endpointing now tests loudness several times a second instead of once per half-second block, so this no longer carries a hidden rounding delay on top of it. Raise it if it still cuts you off mid-sentence. |
 | `max_command_seconds` | `12.0` | Hard cap on one utterance. |
 | `sample_rate` | `16000` | What the Vosk models expect. Changing it breaks recognition. |
+| `calibrate_noise` | `true` | Measure this room's ambient noise for about a second at the start of each command and raise the effective silence threshold to clear it, instead of trusting one fixed number for every room — the fix for "keeps listening long after I stop talking" in a room with any background noise. |
+| `calibration_seconds` | `1.0` | How much initial audio is used to measure the noise floor. |
+| `calibration_margin` | `1.6` | The effective threshold is the measured noise floor times this much headroom, capped well above the configured floor so one loud noise during calibration cannot deafen the rest of the utterance. |
+
+`blackvoice mic` shows both the configured floor and the live calibrated
+threshold for the room you are actually in — the first thing to run if
+listening still feels wrong after a config change.
 
 ## `voice` — speech output
 
 ```jsonc
 "voice": {
   "engine": "auto",
-  "rate": 165,
+  "rate": 145,
   "volume": 0.9,
   "voice_en": "en-us",
   "voice_hi": "hi",
+  "piper_voice_en": "en_US-lessac-medium",
+  "piper_voice_hi": "hi_IN-pratham-medium",
+  "piper_auto_download": true,
+  "piper_auto_install": true,
   "piper_model": ""
 }
 ```
 
 `engine` is `auto` by default and picks the best available: **piper** (neural,
-needs a voice model), then **espeak-ng** (tiny, instant, speaks Hindi), then
+sounds like a person), then **espeak-ng** (tiny, instant, speaks Hindi), then
 **spd-say**, then **pyttsx3**. Set it explicitly to force one, or `"none"` to
 print replies instead of speaking them.
 
-Hindi text is detected by its Devanagari characters and spoken with `voice_hi`.
+Hindi is detected two ways, not just by Devanagari script: an AI reply written
+in Hinglish (romanised Hindi, no Devanagari at all) is recognised by a short
+list of common Hindi words, so it is spoken with `voice_hi` too rather than an
+English voice guessing at pronunciations it was never trained on.
 
 ```bash
 blackvoice say "testing one two three"
 ```
 
-For piper, set `piper_model` to the absolute path of a `.onnx` voice.
+**Piper is installed automatically.** `piper_auto_install` (on by default)
+fetches the Piper *program* itself on first run if it is not found anywhere —
+a private, per-user install, no root, about 25 MB, the same size class as the
+speech models this project already downloads without asking. `piper_auto_download`
+(also on by default) separately fetches the *voice* (`piper_voice_en` /
+`piper_voice_hi`, ~60 MB each) the first time it is actually needed. Turn
+either off and Black Voice falls back to espeak-ng, which is always available
+but sounds noticeably more robotic. Fetch the program by hand, or check
+whether it is already there:
+
+```bash
+blackvoice setup --piper
+blackvoice voice           # shows the installed binary and voices
+```
+
+For a specific `.onnx` voice file, set `piper_model` to its absolute path —
+this overrides `piper_voice_en`/`piper_voice_hi`.
 
 ## `ai` — the question-answering backend
 
@@ -273,6 +308,14 @@ machine can take it.
 
 Nothing leaves the machine. If Ollama is not installed at all, you get a
 clear message with the install link the first time a question needs it.
+
+**Replies are spoken as they are generated,** not after the whole answer has
+finished — the first sentence is spoken the moment it is complete, while the
+rest keeps streaming in and is spoken sentence by sentence behind it. A short
+reply with no sentence-ending punctuation (common in Hinglish) is still
+spoken as one chunk once the stream ends, exactly as before; only longer,
+punctuated answers get the head start. This applies to Ollama only — Claude
+and OpenAI answer in one blocking call, as they always have.
 
 ### Claude
 

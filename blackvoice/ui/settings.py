@@ -58,6 +58,7 @@ SECTIONS: List[Tuple[str, str]] = [
 CHOICES: Dict[str, List[str]] = {
     "speech.mode": ["hybrid", "offline", "online"],
     "speech.language": ["both", "en", "hi"],
+    "wake.language": ["", "en", "hi"],
     "voice.engine": ["auto", "piper", "espeak", "spd-say", "pyttsx3", "none"],
     "ai.provider": ["ollama", "anthropic", "openai", "none"],
     "ui.theme": ["light", "dark"],
@@ -105,12 +106,18 @@ HELP: Dict[str, str] = {
     "wake.phrases": "Comma separated. Two words — 'hey black' — trigger far less by accident.",
     "wake.hotkey": "Shown for reference. Bind it in your desktop's own keyboard settings.",
     "wake.chime": "Short beep when it starts listening.",
+    "wake.language": "Which model spots the wake word. Empty follows Recognition -> Language.",
     "audio.input_device": "Which microphone to use.",
-    "audio.silence_threshold": "Loudness below this counts as silence. Run 'blackvoice mic' to find yours.",
+    "audio.silence_threshold": "Loudness below this counts as silence. A floor, not the last "
+                               "word when calibration is on. Run 'blackvoice mic' to find yours.",
     "audio.silence_timeout": "Seconds of silence that end a command.",
     "audio.max_command_seconds": "Hard limit on one utterance.",
     "audio.sample_rate": "What the speech models expect. Changing it breaks recognition.",
     "audio.block_size": "Samples read at a time.",
+    "audio.calibrate_noise": "Measure the room's ambient noise at the start of each command and "
+                             "raise the silence threshold to clear it. Run 'blackvoice mic' to see it work.",
+    "audio.calibration_seconds": "How much initial audio is used to measure the noise floor.",
+    "audio.calibration_margin": "The effective threshold is the noise floor times this much headroom.",
     "voice.engine": "auto picks the best installed: piper, then espeak-ng, then spd-say.",
     "voice.rate": "Words per minute.",
     "voice.volume": "0 to 1.",
@@ -119,6 +126,8 @@ HELP: Dict[str, str] = {
     "voice.piper_voice_en": "Neural English voice. Downloaded on first use (~60 MB).",
     "voice.piper_voice_hi": "Neural Hindi voice. Downloaded on first use (~60 MB).",
     "voice.piper_auto_download": "Fetch the Piper voice the first time it is needed.",
+    "voice.piper_auto_install": "Fetch the Piper program itself on first run if it is not found "
+                                "anywhere - a private, per-user install, no root, about 25 MB.",
     "voice.piper_model": "An explicit .onnx path, which overrides the two voices above.",
     "safety.confirm_shell": "Ask before running anything that is not read-only. Leave this on.",
     "safety.blocked_patterns": "Never run, confirmation or not. One pattern per line.",

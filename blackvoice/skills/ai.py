@@ -16,10 +16,12 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import threading
 from collections import deque
-from typing import Deque, Dict, List
+from typing import Deque, Dict, Iterator, List, Optional
 
 from ..nlu.intents import Intent
+from ..text import split_ready_sentences
 from .base import Reply, Skill, SkillContext
 
 log = logging.getLogger(__name__)
@@ -36,6 +38,10 @@ class AISkill(Skill):
         self.ai = ctx.config.ai
         self._history: Deque[Dict[str, str]] = deque(maxlen=HISTORY_TURNS * 2)
         self._client = None  # lazily built Anthropic client
+        #: bumped on every handle() call; a background stream from an older
+        #: question checks this before each ctx.say() and stops quietly once
+        #: it no longer matches, rather than talking over a newer answer.
+        self._generation = 0
 
     def handle(self, intent: Intent) -> Reply:
         if intent.action != "ask":
@@ -49,7 +55,12 @@ class AISkill(Skill):
         if provider == "none":
             return Reply.error("I did not understand that, and the AI backend is switched off.")
 
+        self._generation += 1
+        generation = self._generation
+
         try:
+            if provider == "ollama":
+                return self._handle_streaming(question, generation)
             answer = self._ask(provider, question)
         except Exception as exc:
             log.exception("AI backend %s failed", provider)
@@ -58,18 +69,19 @@ class AISkill(Skill):
         if not answer:
             return Reply.error("The AI backend returned an empty answer.")
 
-        self._history.append({"role": "user", "content": question})
-        self._history.append({"role": "assistant", "content": answer})
+        self._remember(question, answer)
         return Reply(speech=answer, display=answer, data={"provider": provider})
 
     def reset(self) -> None:
         """Forget the conversation - bound to "new chat" in the tray menu."""
         self._history.clear()
 
+    def _remember(self, question: str, answer: str) -> None:
+        self._history.append({"role": "user", "content": question})
+        self._history.append({"role": "assistant", "content": answer})
+
     # -------------------------------------------------------------- routing
     def _ask(self, provider: str, question: str) -> str:
-        if provider == "ollama":
-            return self._ask_ollama(question)
         if provider == "anthropic":
             return self._ask_anthropic(question)
         if provider == "openai":
@@ -80,12 +92,110 @@ class AISkill(Skill):
         return list(self._history) + [{"role": "user", "content": question}]
 
     # --------------------------------------------------------------- ollama
-    def _ask_ollama(self, question: str) -> str:
+    def _handle_streaming(self, question: str, generation: int) -> Reply:
+        """Speak the first sentence as soon as it exists; keep talking in the
+        background instead of making the user wait for the whole answer.
+
+        Everything through the first confirmed sentence happens
+        synchronously, on the same thread that produces this method's return
+        value, exactly like every other skill - so nothing about
+        ``Engine._deliver`` or the SPEAKING state transition has to change.
+        Only what comes after that first sentence moves to a background
+        thread, using the same "call ctx.say() outside the normal Reply
+        path" mechanism UtilsSkill's timers already rely on
+        (``UtilsSkill._schedule``).
+
+        If the stream ends before ever confirming a sentence boundary - a
+        short reply, or Hinglish with no Western sentence-final punctuation,
+        which this project's own AI system prompt explicitly allows for -
+        the whole answer is spoken as one chunk instead, exactly today's
+        non-streaming behaviour. That is a deliberate graceful degradation,
+        not a bug: such a reply never sounded any different before, it just
+        does not get the latency win either.
+        """
+        stream = self._stream_ollama(question)
+        buffer = ""
+        full_text = ""
+        first_sentence: Optional[str] = None
+        rest: List[str] = []
+
+        for piece in stream:
+            full_text += piece
+            buffer += piece
+            sentences, buffer = split_ready_sentences(buffer)
+            if sentences:
+                first_sentence, rest = sentences[0], sentences[1:]
+                break
+
+        if first_sentence is None:
+            answer = (full_text or buffer).strip()
+            if not answer:
+                return Reply.error("The AI backend returned an empty answer.")
+            self._remember(question, answer)
+            return Reply(speech=answer, display=answer, data={"provider": "ollama"})
+
+        threading.Thread(
+            target=self._speak_the_rest,
+            args=(stream, buffer, full_text, rest, question, generation),
+            name="ai-stream",
+            daemon=True,
+        ).start()
+        return Reply(
+            speech=first_sentence, display=first_sentence, data={"provider": "ollama"}
+        )
+
+    def _speak_the_rest(
+        self,
+        stream: Iterator[str],
+        buffer: str,
+        full_text: str,
+        rest: List[str],
+        question: str,
+        generation: int,
+    ) -> None:
+        try:
+            for sentence in rest:
+                if not self._say_if_current(sentence, generation):
+                    return
+            for piece in stream:
+                full_text += piece
+                buffer += piece
+                sentences, buffer = split_ready_sentences(buffer)
+                for sentence in sentences:
+                    if not self._say_if_current(sentence, generation):
+                        return
+            tail = buffer.strip()
+            if tail and not self._say_if_current(tail, generation):
+                return
+        except Exception:
+            log.exception("streaming AI reply failed mid-stream")
+            return
+
+        if generation == self._generation:
+            self._remember(question, full_text.strip())
+
+    def _say_if_current(self, sentence: str, generation: int) -> bool:
+        """Speak ``sentence`` unless a newer question has since taken over."""
+        if generation != self._generation:
+            return False
+        self.ctx.say(sentence)
+        return True
+
+    def _stream_ollama(self, question: str) -> Iterator[str]:
+        """Yield each incremental piece of content as Ollama streams the reply.
+
+        NDJSON, one JSON object per line - parsed the same way
+        ``ollama_models.pull()`` already parses ``/api/pull``'s stream, this
+        project's established shape for a streaming Ollama endpoint rather
+        than a second one invented just for chat.
+        """
+        import json as _json
+
         import requests
 
         payload = {
             "model": self.ai.ollama_model,
-            "stream": False,
+            "stream": True,
             "messages": [{"role": "system", "content": self.ai.system_prompt}]
             + self._messages(question),
             "options": {"num_predict": self.ai.max_tokens},
@@ -94,9 +204,25 @@ class AISkill(Skill):
             f"{self.ai.ollama_url.rstrip('/')}/api/chat",
             json=payload,
             timeout=self.ai.timeout,
+            stream=True,
         )
         response.raise_for_status()
-        return (response.json().get("message") or {}).get("content", "").strip()
+
+        with response:
+            for raw_line in response.iter_lines():
+                if not raw_line:
+                    continue
+                try:
+                    data = _json.loads(raw_line)
+                except _json.JSONDecodeError:
+                    continue
+                if data.get("error"):
+                    raise RuntimeError(str(data["error"]))
+                piece = (data.get("message") or {}).get("content", "")
+                if piece:
+                    yield piece
+                if data.get("done"):
+                    return
 
     # ------------------------------------------------------------ anthropic
     def _anthropic_client(self):

@@ -41,7 +41,8 @@ from pathlib import Path
 from typing import List, Optional
 
 from ..config import BUNDLED_BIN_DIR, AudioConfig, SpeechConfig
-from .mic import Microphone, rms_level
+from ..text import SENTENCE_PUNCT
+from .mic import Endpointer, Microphone
 
 log = logging.getLogger(__name__)
 
@@ -155,13 +156,6 @@ _TIMESTAMP = re.compile(r"^\[[\d:.,\s>-]+\]\s*")
 #: spoken command anything in brackets is Whisper describing the audio rather
 #: than transcribing it, so it never belongs in the text handed to the router.
 _BRACKETED = re.compile(r"[\[(][^\])]*[\])]")
-
-#: Sentence-ending punctuation, including the Devanagari danda. Whisper writes
-#: prose where Vosk writes bare words, and the router's normalise() keeps the
-#: full stop on purpose - arithmetic needs "2.5" - so a trailing one survives
-#: into the rules and defeats every pattern anchored with ``$``. Requiring
-#: whitespace or end-of-string after it is what leaves a decimal point alone.
-_SENTENCE_PUNCT = re.compile(r"[.!?\u0964]+(?=\s|$)")
 
 #: Whisper reports no usable per-utterance confidence, so results carry a
 #: nominal one. It is never compared against a Vosk score - the tiering in
@@ -370,7 +364,11 @@ class WhisperCppRecognizer:
             if line:
                 parts.append(line)
         text = _BRACKETED.sub(" ", " ".join(parts))
-        text = _SENTENCE_PUNCT.sub("", text)
+        # The router's normalise() keeps a full stop on purpose - arithmetic
+        # needs "2.5" - so a trailing one from Whisper's prose survives into
+        # the rules and defeats every pattern anchored with $ unless it is
+        # stripped here first.
+        text = SENTENCE_PUNCT.sub("", text)
         return " ".join(text.split())
 
 
@@ -573,30 +571,23 @@ class HybridSTT:
             rec.reset()
 
         chunks: List[bytes] = []
-        seconds_per_block = mic.seconds_per_block
-        silent_for = 0.0
         elapsed = 0.0
-        heard_speech = False
         last_partial = ""
+        endpointer = Endpointer(self.audio)
 
         while elapsed < self.audio.max_command_seconds:
             block = mic.read(timeout=1.0)
             if block is None:
-                if heard_speech:
+                if endpointer.heard_speech:
                     break
                 continue
 
             chunks.append(block)
-            elapsed += seconds_per_block
-            level = rms_level(block)
+            elapsed += mic.seconds_per_block
+            levels = endpointer.feed(block)
             if on_level:
-                on_level(level)
-
-            if level >= self.audio.silence_threshold:
-                heard_speech = True
-                silent_for = 0.0
-            else:
-                silent_for += seconds_per_block
+                for level in levels:
+                    on_level(level)
 
             # Live partial text for the overlay, from the first model only.
             if on_partial and self.recognizers:
@@ -607,10 +598,10 @@ class HybridSTT:
                     last_partial = partial
                     on_partial(partial)
 
-            if heard_speech and silent_for >= self.audio.silence_timeout:
+            if endpointer.should_stop:
                 break
 
-        if not heard_speech:
+        if not endpointer.heard_speech:
             return Transcript("", 0.0)
 
         return self.transcribe_pcm(b"".join(chunks))

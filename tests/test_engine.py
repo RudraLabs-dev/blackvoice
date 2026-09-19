@@ -151,3 +151,84 @@ def test_bus_survives_a_broken_subscriber() -> None:
     bus.publish("topic", n=7)
 
     assert seen == [7], "one bad subscriber must not stop the others"
+
+
+# --------------------------------------------------------------------------- #
+# wake-word language: it used to be hardcoded to English regardless of config
+# --------------------------------------------------------------------------- #
+def _engine_with(monkeypatch, **overrides) -> Engine:
+    monkeypatch.setattr("blackvoice.app.ensure_dirs", lambda: None)
+    config = Config()
+    for key, value in overrides.items():
+        section, name = key.split(".", 1)
+        setattr(getattr(config, section), name, value)
+    eng = Engine(config)
+    return eng
+
+
+def test_wake_word_follows_speech_language_when_hindi(monkeypatch) -> None:
+    eng = _engine_with(monkeypatch, **{"speech.language": "hi"})
+    try:
+        assert eng.wake.model_path == eng.config.model_path("hi")
+    finally:
+        eng.stop()
+
+
+def test_wake_word_follows_speech_language_when_english(monkeypatch) -> None:
+    eng = _engine_with(monkeypatch, **{"speech.language": "en"})
+    try:
+        assert eng.wake.model_path == eng.config.model_path("en")
+    finally:
+        eng.stop()
+
+
+def test_wake_word_uses_english_when_speech_language_is_both(monkeypatch) -> None:
+    eng = _engine_with(monkeypatch, **{"speech.language": "both"})
+    try:
+        assert eng.wake.model_path == eng.config.model_path("en")
+    finally:
+        eng.stop()
+
+
+def test_wake_language_overrides_speech_language(monkeypatch) -> None:
+    eng = _engine_with(monkeypatch, **{"speech.language": "en", "wake.language": "hi"})
+    try:
+        assert eng.wake.model_path == eng.config.model_path("hi")
+    finally:
+        eng.stop()
+
+
+# --------------------------------------------------------------------------- #
+# the Vosk-only-plus-"both" Hinglish gap: a one-time notice, not a nag
+# --------------------------------------------------------------------------- #
+def test_notifies_when_vosk_only_and_language_is_both(engine: Engine, monkeypatch) -> None:
+    monkeypatch.setattr(type(engine.stt), "offline_engine", property(lambda self: "vosk"))
+    engine.config.speech.language = "both"
+    received = []
+    engine.bus.subscribe(Topic.REPLY, lambda e: received.append(e.payload))
+
+    engine._notify_offline_engine_gap()
+
+    assert received and "setup --whisper" in received[0]["display"]
+
+
+def test_no_notice_when_whisper_is_already_leading(engine: Engine, monkeypatch) -> None:
+    monkeypatch.setattr(type(engine.stt), "offline_engine", property(lambda self: "whisper"))
+    engine.config.speech.language = "both"
+    received = []
+    engine.bus.subscribe(Topic.REPLY, lambda e: received.append(e.payload))
+
+    engine._notify_offline_engine_gap()
+
+    assert received == []
+
+
+def test_no_notice_when_language_is_not_both(engine: Engine, monkeypatch) -> None:
+    monkeypatch.setattr(type(engine.stt), "offline_engine", property(lambda self: "vosk"))
+    engine.config.speech.language = "hi"
+    received = []
+    engine.bus.subscribe(Topic.REPLY, lambda e: received.append(e.payload))
+
+    engine._notify_offline_engine_gap()
+
+    assert received == []

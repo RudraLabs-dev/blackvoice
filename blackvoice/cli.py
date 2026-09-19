@@ -171,6 +171,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     if args.whisper:
         return _setup_whisper(args)
+    if args.piper:
+        return _setup_piper(args)
     if args.ollama:
         return _setup_ollama(args)
 
@@ -239,8 +241,12 @@ def _setup_whisper(args: argparse.Namespace) -> int:
         print(f"{OK} whisper.cpp  {binary}")
     else:
         print(f"{BAD} whisper.cpp was not found on this system")
-        print("  It is a native binary, not a Python package. Install it with")
-        print("  your package manager, or build it:")
+        print("  It is a native binary, not a Python package.")
+        print()
+        print("  Debian sid/forky package it directly:")
+        print("    sudo apt install whisper.cpp")
+        print()
+        print("  Anywhere else, build it yourself:")
         print("    git clone https://github.com/ggml-org/whisper.cpp")
         print("    cmake -B build whisper.cpp && cmake --build build -j")
         print("  Then put whisper-cli on PATH, or set speech.whisper_binary.")
@@ -251,6 +257,47 @@ def _setup_whisper(args: argparse.Namespace) -> int:
         print(f"  {CONFIG_FILE}")
 
     return 0 if binary else 1
+
+
+def _setup_piper(args: argparse.Namespace) -> int:
+    """Fetch the Piper binary itself, right now, rather than waiting for
+    voice.piper_auto_install to do it on the next run - same code path, same
+    result, just on demand.
+    """
+    from . import piper_install
+
+    existing = piper_install.find_binary()
+    if existing is not None and not args.force:
+        print(f"{OK} Piper is already available at {existing}")
+        print("  nothing to install")
+        return 0
+
+    print(f"{ARROW} downloading Piper (about 25 MB)")
+    last = [-1]
+
+    def _progress(status: str, done: int, total: int) -> None:
+        if status == "extracting":
+            print(chr(13) + "  extracting..." + " " * 20)
+            return
+        percent = int(done * 100 / total) if total else 0
+        if percent == last[0]:
+            return
+        last[0] = percent
+        print(chr(13) + f"  {percent:3d}%  {done / 2**20:6.1f} MiB", end="", flush=True)
+
+    try:
+        binary = piper_install.download_and_install(on_progress=_progress)
+    except piper_install.PiperError as exc:
+        print()
+        print(f"{BAD} {exc}")
+        return 1
+
+    print()
+    print(f"{OK} installed to {binary}")
+    print()
+    print(f"{BULLET} fetch a voice next: blackvoice voice --install")
+    print(f"{BULLET} then hear it:       blackvoice voice --test")
+    return 0
 
 
 def _install_ollama(config: Config) -> int:
@@ -387,7 +434,7 @@ def cmd_mic(args: argparse.Namespace) -> int:
     separates three failures that look identical from the outside: no device,
     a device that produces silence, and recognition that is not triggering.
     """
-    from .audio.mic import Microphone, MicrophoneUnavailable, rms_level
+    from .audio.mic import Endpointer, Microphone, MicrophoneUnavailable, rms_level
 
     config = Config.load()
 
@@ -433,6 +480,7 @@ def cmd_mic(args: argparse.Namespace) -> int:
     peak = 0.0
     heard = 0
     blocks = 0
+    endpointer = Endpointer(config.audio)
 
     try:
         with Microphone(config.audio) as mic:
@@ -446,6 +494,7 @@ def cmd_mic(args: argparse.Namespace) -> int:
                 peak = max(peak, level)
                 if level >= threshold:
                     heard += 1
+                endpointer.feed(block)
 
                 # Scale for display the same way the overlay waveform does.
                 filled = int(min(1.0, level * 8.0) * 40)
@@ -469,7 +518,15 @@ def cmd_mic(args: argparse.Namespace) -> int:
 
     print(f"Blocks captured   {blocks}")
     print(f"Peak level        {peak * 100:.1f}%")
-    print(f"Silence threshold {threshold * 100:.1f}%  (audio.silence_threshold)")
+    print(f"Silence threshold {threshold * 100:.1f}%  (audio.silence_threshold, the configured floor)")
+    if config.audio.calibrate_noise:
+        if endpointer.noise_floor is not None:
+            print(f"Calibrated floor  {endpointer.noise_floor * 100:.1f}%  "
+                  f"(from the first {config.audio.calibration_seconds:g}s of this room)")
+            print(f"Live threshold    {endpointer.threshold * 100:.1f}%  "
+                  "(what a real command would actually be judged against)")
+        else:
+            print(f"{DOT} not enough audio to calibrate in this run - try a longer --seconds")
     print()
 
     if peak < 0.002:
@@ -499,12 +556,12 @@ def cmd_voice(args: argparse.Namespace) -> int:
     people cannot follow it. Piper sounds like a person; this is the shortest
     path from one to the other.
     """
-    from . import voices
+    from . import piper_install, voices
     from .audio.tts import Speaker, detect_engine
 
     config = Config.load()
 
-    binary = voices.piper_binary()
+    binary = piper_install.find_binary()
     print(f"piper binary      {binary or '(not installed)'}")
     print(f"current engine    {config.voice.engine} -> {detect_engine()}")
     print()
@@ -521,10 +578,7 @@ def cmd_voice(args: argparse.Namespace) -> int:
         if binary is None:
             print("Piper is not installed. Without it these voices cannot be used:")
             print()
-            print("    pip install piper-tts")
-            print()
-            print("  or download a release from")
-            print("  https://github.com/rhasspy/piper/releases")
+            print("    blackvoice setup --piper")
             print()
         print("To fetch the voices:   blackvoice voice --install")
         print("To hear the result:    blackvoice voice --test")
@@ -684,12 +738,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     if whisper_binary and whisper_model.exists():
         print(f"  {OK} Hinglish in one pass (whisper.cpp leads, Vosk backs it up)")
+    elif config.speech.language == "both":
+        # Vosk still works on its own - this is not fatal - but it is the
+        # single biggest thing standing between this install and a sentence
+        # that switches language halfway, so it earns a real problems-list
+        # entry rather than being an aside nobody reads until something
+        # already sounds wrong.
+        print(f"  {BAD} Vosk only: a sentence mixing Hindi and English will")
+        print("      lose half of itself.")
+        problems.append("blackvoice setup --whisper")
     else:
-        # Not a problem to fix - Vosk still works - but it is the single
-        # biggest thing standing between this install and a sentence that
-        # switches language halfway.
-        print(f"  {DOT} Vosk only: a sentence mixing Hindi and English will")
-        print("      lose half of itself. 'blackvoice setup --whisper' fixes that.")
+        print(f"  {DOT} whisper.cpp is not installed, but speech.language is not "
+              "'both' - no code-switched sentence to lose half of")
 
     print("\nModels")
     for lang in ("en", "hi"):
@@ -1009,6 +1069,10 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument(
         "--whisper", action="store_true",
         help="download a whisper.cpp model instead of the Vosk ones",
+    )
+    setup.add_argument(
+        "--piper", action="store_true",
+        help="download the Piper binary itself (voices come from 'blackvoice voice --install')",
     )
     setup.add_argument(
         "--model",

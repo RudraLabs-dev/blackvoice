@@ -257,6 +257,44 @@ def test_capture_respects_the_hard_cap() -> None:
     assert seconds <= cfg.max_command_seconds + cfg.block_size / cfg.sample_rate
 
 
+class _BlipMic:
+    """One loud block, then ambient blips that cross the raw threshold
+    interleaved with real silence - the shape of the reported "keeps
+    listening too long" bug. A corpus recorded through this harness has to
+    stop the same way the live assistant now does, which is the point of
+    both sharing :class:`~blackvoice.audio.mic.Endpointer` rather than each
+    keeping their own copy of the endpointing decision.
+    """
+
+    def __init__(self, block_size: int) -> None:
+        self.block_size = block_size
+        self.seconds_per_block = block_size / 16000
+        self._queue = [_pcm(6000, block_size=block_size)]
+        for _ in range(20):
+            # 500/32767 ~= 0.0153: crosses the default 0.012 threshold, as
+            # ambient noise does, but stays well under the 1.5x confirm line.
+            self._queue.append(_pcm(500, block_size=block_size))   # a blip
+            self._queue.append(_pcm(0, block_size=block_size))     # real silence
+
+    def read(self, timeout: float = 1.0):
+        if self._queue:
+            return self._queue.pop(0)
+        return _pcm(0, block_size=self.block_size)
+
+
+def test_capture_survives_periodic_ambient_blips_like_the_live_assistant_does() -> None:
+    cfg = Config().audio
+    cfg.calibrate_noise = False
+    cfg.silence_timeout = 0.8
+    mic = _BlipMic(block_size=cfg.block_size)
+
+    pcm = evaluate.capture_utterance(mic, cfg)
+    seconds = len(pcm) / 2 / cfg.sample_rate
+    assert seconds < cfg.max_command_seconds, (
+        "a hard reset on every blip would have run this all the way to the cap"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # prompts
 # --------------------------------------------------------------------------- #

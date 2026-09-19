@@ -48,12 +48,27 @@ class AudioConfig:
     sample_rate: int = 16000
     block_size: int = 8000
     input_device: Optional[int] = None       # None = system default mic
-    #: RMS level (0..1) below which a block counts as silence
+    #: RMS level (0..1) below which a block counts as silence. A floor, not
+    #: the last word: when calibrate_noise is on, the effective threshold used
+    #: while listening is raised above this to match the room, never lowered
+    #: below it. See audio.mic.Endpointer.
     silence_threshold: float = 0.012
-    #: stop capturing a command after this many seconds of silence
-    silence_timeout: float = 1.2
+    #: stop capturing a command after this many seconds of silence. Lower
+    #: than it looks: Endpointer tests loudness several times a second rather
+    #: than once per 0.5s mic block, so this no longer carries a hidden
+    #: rounding delay on top of it.
+    silence_timeout: float = 0.8
     #: hard cap on a single command utterance
     max_command_seconds: float = 12.0
+    #: measure the room's ambient noise at the start of each utterance and
+    #: raise the effective silence threshold to clear it, instead of trusting
+    #: one fixed number for every room
+    calibrate_noise: bool = True
+    #: seconds of initial audio used to measure the noise floor
+    calibration_seconds: float = 1.0
+    #: effective threshold = noise floor * this margin, never below
+    #: silence_threshold and capped well above it - see Endpointer
+    calibration_margin: float = 1.6
 
 
 @dataclass
@@ -123,6 +138,11 @@ class WakeConfig:
     hotkey: str = "Ctrl+Alt+Space"
     #: play a short beep when activated
     chime: bool = True
+    #: which Vosk model the wake word is spotted in: "en" or "hi". Blank
+    #: inherits speech.language ("both" maps to "en", since the wake grammar
+    #: needs one model either way and the wake phrases here are Roman script).
+    #: Leave it blank unless the wake word itself is only ever said in Hindi.
+    language: str = ""
 
 
 @dataclass
@@ -145,6 +165,12 @@ class VoiceConfig:
     piper_voice_hi: str = "hi_IN-pratham-medium"
     #: fetch the Piper voice the first time it is needed
     piper_auto_download: bool = True
+    #: fetch the Piper *program* itself on first run if no copy is found
+    #: anywhere - a private, per-user install, no root. On by default: unlike
+    #: Ollama's multi-gigabyte build, this archive is tens of MB, the same
+    #: size class as the Vosk models this project already downloads without
+    #: asking. See blackvoice.piper_install.
+    piper_auto_install: bool = True
     #: an explicit .onnx path, which overrides the named voices above
     piper_model: str = ""
 

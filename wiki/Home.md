@@ -74,13 +74,23 @@ Set `speech.mode` to `"offline"` and nothing ever leaves the machine, either way
 
 ## Project status
 
-Version 0.5.3. The command routing, safety guard, configuration and skill layers
-are covered by 408 tests. The audio path — microphone capture, recognition,
+Version 0.6.0. The command routing, safety guard, configuration and skill layers
+are covered by 473 tests. The audio path — microphone capture, recognition,
 wake word and speech output — needs a real Linux machine with a microphone to
 exercise, so treat it as the least-tested part of the system and report what
 breaks. `blackvoice eval` exists for exactly that: recording your own voice
 against a set of prompts and scoring what each recognition backend actually
 gets right, rather than trusting a claim about accuracy in the abstract.
+
+Recent work focused on making it feel less like a command-line tool that
+happens to listen and more like an assistant: calibrated, hysteresis-based
+endpointing so it stops listening promptly instead of lingering in a noisy
+room (`blackvoice mic` shows the live calibrated threshold), a fix for the
+wake word being silently pinned to English regardless of `speech.language`,
+an automatic private install of the Piper voice engine itself (not just its
+voices) so a fresh install sounds natural rather than falling back to
+espeak-ng, and Ollama replies that are spoken sentence by sentence as they
+are generated instead of only after the whole answer finishes.
 
 ---
 

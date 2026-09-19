@@ -11,7 +11,7 @@
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-black.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-black.svg)](https://www.python.org/)
 [![Platform: Linux](https://img.shields.io/badge/platform-linux-black.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-285%20passing-black.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-473%20passing-black.svg)](tests/)
 
 **[Documentation](https://github.com/RudraLabs-dev/blackvoice/wiki)** ·
 [Installation](https://github.com/RudraLabs-dev/blackvoice/wiki/Installation) ·
@@ -86,13 +86,13 @@ The full command reference, in both languages, is in the
 **Debian, Ubuntu, Mint, Pop!\_OS**
 
 ```bash
-sudo apt install ./blackvoice_0.5.3-1_amd64.deb
+sudo apt install ./blackvoice_0.6.0-1_amd64.deb
 ```
 
 **Fedora, RHEL, openSUSE**
 
 ```bash
-sudo dnf install ./blackvoice-0.5.3-1.x86_64.rpm
+sudo dnf install ./blackvoice-0.6.0-1.x86_64.rpm
 ```
 
 Packages are on the
@@ -228,7 +228,7 @@ traverse a path.
 {
   "speech": { "mode": "hybrid", "language": "both" },
   "wake":   { "phrases": ["black"] },
-  "voice":  { "engine": "auto", "rate": 165 },
+  "voice":  { "engine": "auto", "rate": 145 },
   "ai":     { "provider": "ollama", "ollama_model": "llama3.2" },
   "safety": { "confirm_shell": true },
   "skills": { "weather_city": "Jaipur" }
@@ -267,7 +267,7 @@ this repository, so it is reviewed alongside the code.
 
 ```bash
 pip install -e ".[all,dev]"
-pytest -q                  # 165 tests, no microphone required
+pytest -q                  # 473 tests, no microphone required
 blackvoice text            # exercise the router without speaking
 ```
 
@@ -296,10 +296,12 @@ wiki on GitHub directly does not work — the next sync overwrites it. Change
 
 ## Project status
 
-Version 0.1.0. The routing, safety guard, configuration and skill layers are
-covered by 165 tests. The audio path — microphone capture, Vosk recognition,
-wake word and speech output — needs a real Linux machine with a microphone to
-exercise, so treat it as the least-proven part and please report what breaks.
+The routing, safety guard, configuration and skill layers are covered by 473
+tests. The audio path — microphone capture, recognition, wake word and speech
+output — needs a real Linux machine with a microphone to exercise, so treat it
+as the least-proven part and please report what breaks. `blackvoice eval`
+exists for exactly that: recording your own voice against a set of prompts and
+scoring what each recognition backend actually gets right.
 
 Issues and pull requests are welcome:
 [RudraLabs-dev/blackvoice/issues](https://github.com/RudraLabs-dev/blackvoice/issues)

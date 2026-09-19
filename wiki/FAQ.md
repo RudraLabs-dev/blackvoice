@@ -181,15 +181,29 @@ mode is correct, the problem is recognition — see
 
 ### Why does it sound robotic?
 
-espeak-ng is small and instant, and it speaks Hindi out of the box, but it is
-robotic. For a natural voice, install
-[piper](https://github.com/rhasspy/piper) and point `voice.piper_model` at a
-voice file.
+If you are hearing espeak-ng, it is because Piper — the natural-sounding
+voice — was not available. It should install itself: on first run, if no
+`piper` binary is found anywhere, Black Voice fetches a private, per-user
+copy automatically (`voice.piper_auto_install`, on by default), and the
+first Piper voice it actually needs downloads the same way
+(`voice.piper_auto_download`). Check what actually happened with:
+
+```bash
+blackvoice voice
+blackvoice setup --piper    # fetch the binary right now, rather than on next run
+```
+
+If Piper *is* the engine and it still sounds wrong, the likely cause is not
+Piper itself: a Hinglish or Hindi reply written in Roman script (no Devanagari
+at all — the AI backend does this deliberately, matching how the question was
+asked) used to be routed to the English voice, which guesses at pronunciations
+it was never trained on. That is fixed by detecting common romanised Hindi
+words, not by anything voice-related — see [Configuration](Configuration#voice--speech-output).
 
 ### Is it production ready?
 
-Version 0.1.0. The command routing, safety guard, configuration and skill layers
-have 165 tests. The audio path needs a real machine with a microphone to
+Version 0.6.0. The command routing, safety guard, configuration and skill layers
+have 473 tests. The audio path needs a real machine with a microphone to
 exercise properly, so treat that as the least-proven part and report what breaks.
 
 ### How do I uninstall it?

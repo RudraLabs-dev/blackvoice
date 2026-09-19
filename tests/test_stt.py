@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import struct
 import subprocess
 import wave
 
@@ -15,6 +16,26 @@ from blackvoice.audio.stt import (
     find_whisper_binary,
 )
 from blackvoice.config import AudioConfig, SpeechConfig
+
+
+def _pcm_block(amplitude: float, seconds: float, sample_rate: int = 16000) -> bytes:
+    """A block of constant-amplitude int16 PCM, whose RMS equals ``amplitude``."""
+    n = max(1, round(seconds * sample_rate))
+    value = max(-32768, min(32767, int(round(amplitude * 32767))))
+    return struct.pack(f"<{n}h", *([value] * n))
+
+
+class _FakeMicrophone:
+    """Hands out pre-recorded blocks, then silence, like a real Microphone."""
+
+    def __init__(self, blocks, seconds_per_block: float = 0.5) -> None:
+        self._blocks = list(blocks)
+        self.seconds_per_block = seconds_per_block
+
+    def read(self, timeout: float = 1.0):
+        if self._blocks:
+            return self._blocks.pop(0)
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -330,3 +351,50 @@ def test_offline_engine_names_what_would_run() -> None:
 def test_has_offline_counts_whisper() -> None:
     assert _hybrid(_FakeWhisper("x"), []).has_offline is True
     assert _hybrid(None, []).has_offline is False
+
+
+# --------------------------------------------------------------------------- #
+# listen_once: the full capture loop, with the calibrated Endpointer wired in
+# --------------------------------------------------------------------------- #
+def test_listen_once_stops_on_trailing_silence_and_transcribes() -> None:
+    stt = _hybrid(_FakeWhisper("firefox kholo"), [], mode="offline")
+    stt.audio.calibrate_noise = False
+    stt.audio.silence_threshold = 0.02
+    stt.audio.silence_timeout = 0.3
+
+    blocks = [_pcm_block(0.5, 0.5)] + [_pcm_block(0.001, 0.5)] * 3
+    mic = _FakeMicrophone(blocks)
+
+    result = stt.listen_once(mic)
+    assert result.text == "firefox kholo"
+
+
+def test_listen_once_reports_nothing_when_only_silence_was_heard() -> None:
+    stt = _hybrid(_FakeWhisper("should never be called"), [], mode="offline")
+    stt.audio.calibrate_noise = False
+    stt.audio.silence_threshold = 0.02
+    stt.audio.max_command_seconds = 1.0
+
+    mic = _FakeMicrophone([_pcm_block(0.001, 0.5)] * 3)
+
+    assert not stt.listen_once(mic)
+
+
+def test_listen_once_survives_periodic_ambient_blips() -> None:
+    """The same regression :mod:`tests.test_mic` covers directly, exercised
+    through the real capture loop end to end.
+    """
+    stt = _hybrid(_FakeWhisper("firefox kholo"), [], mode="offline")
+    stt.audio.calibrate_noise = False
+    stt.audio.silence_threshold = 0.02
+    stt.audio.silence_timeout = 0.4
+    stt.audio.max_command_seconds = 3.0
+
+    blocks = (
+        [_pcm_block(0.5, 0.5)]
+        + [_pcm_block(0.021, 0.1), _pcm_block(0.001, 0.4)] * 4
+    )
+    mic = _FakeMicrophone(blocks)
+
+    result = stt.listen_once(mic)
+    assert result.text == "firefox kholo"

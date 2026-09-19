@@ -13,7 +13,6 @@ as root while the voice belongs to a user - so they are fetched on demand.
 from __future__ import annotations
 
 import logging
-import shutil
 from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
 
@@ -63,11 +62,6 @@ def installed(name: str) -> bool:
 
 def available() -> Dict[str, Tuple[str, str, str]]:
     return dict(VOICES)
-
-
-def piper_binary() -> Optional[str]:
-    """The piper executable, if the system has one."""
-    return shutil.which("piper")
 
 
 def download(

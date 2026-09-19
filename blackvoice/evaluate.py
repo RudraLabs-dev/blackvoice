@@ -160,42 +160,37 @@ def write_wav(path: Path, pcm: bytes, sample_rate: int) -> None:
 def capture_utterance(mic, audio_cfg, on_level: Optional[Callable] = None) -> bytes:
     """Record until the speaker stops, and return the raw PCM.
 
-    This deliberately repeats the endpointing in :meth:`HybridSTT.listen_once`
+    This deliberately repeats the *loop* in :meth:`HybridSTT.listen_once`
     rather than calling it: that method transcribes as it goes and drives the
-    overlay's partial text, and neither belongs in a recording tool. Keeping the
-    two apart means a change to the harness cannot affect the live assistant.
+    overlay's partial text, and neither belongs in a recording tool. But the
+    endpointing decision itself - :class:`~blackvoice.audio.mic.Endpointer` -
+    is shared, not duplicated: a corpus recorded with different endpointing
+    than the live assistant uses would predict nothing about it.
     """
-    from .audio.mic import rms_level
+    from .audio.mic import Endpointer
 
     chunks: List[bytes] = []
-    seconds_per_block = mic.seconds_per_block
-    silent_for = 0.0
     elapsed = 0.0
-    heard_speech = False
+    endpointer = Endpointer(audio_cfg)
 
     while elapsed < audio_cfg.max_command_seconds:
         block = mic.read(timeout=1.0)
         if block is None:
-            if heard_speech:
+            if endpointer.heard_speech:
                 break
             continue
 
         chunks.append(block)
-        elapsed += seconds_per_block
-        level = rms_level(block)
+        elapsed += mic.seconds_per_block
+        levels = endpointer.feed(block)
         if on_level:
-            on_level(level)
+            for level in levels:
+                on_level(level)
 
-        if level >= audio_cfg.silence_threshold:
-            heard_speech = True
-            silent_for = 0.0
-        else:
-            silent_for += seconds_per_block
-
-        if heard_speech and silent_for >= audio_cfg.silence_timeout:
+        if endpointer.should_stop:
             break
 
-    return b"".join(chunks) if heard_speech else b""
+    return b"".join(chunks) if endpointer.heard_speech else b""
 
 
 # --------------------------------------------------------------------------- #
