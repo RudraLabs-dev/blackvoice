@@ -14,6 +14,7 @@ from __future__ import annotations
 import difflib
 import json
 import logging
+import re
 from pathlib import Path
 from typing import List, Optional
 
@@ -127,11 +128,36 @@ class WakeWordDetector:
 
 
 def strip_wake_word(text: str, phrases: List[str]) -> str:
-    """Remove a leading wake phrase so "black open firefox" -> "open firefox"."""
+    """Remove a wake phrase, and everything said before its last repeat.
+
+    Ordinarily this just strips a leading "black open firefox" ->
+    "open firefox". But someone who gets no response to a first "Black,
+    open firefox" often repeats the whole thing again without pausing long
+    enough to end the recording, and the endpointer then captures both
+    attempts as one utterance - confirmed live: whisper transcribed "open
+    firefox Black, open firefox" as a single command, and the word-salad
+    that reached the router ("firefox black open firefox") matched nothing.
+    Cutting after the *last* wake-phrase occurrence rather than only a
+    leading one keeps just the final attempt, the same way a person
+    listening would mentally discard an abandoned first try.
+
+    Matched on a word boundary rather than as a bare prefix, so "blackboard
+    is here" is left alone instead of losing its first syllable to "black" -
+    a real prior gap this closes as a side effect, not just the repeat case.
+    """
     cleaned = (text or "").strip()
-    lowered = cleaned.lower()
-    for phrase in sorted((p.lower() for p in phrases), key=len, reverse=True):
-        if lowered.startswith(phrase):
-            rest = cleaned[len(phrase):]
-            return rest.lstrip(" ,.-:!?").strip()
-    return cleaned
+    if not cleaned:
+        return cleaned
+
+    boundary_words = [re.escape(p.lower()) for p in phrases if p.strip()]
+    if not boundary_words:
+        return cleaned
+    pattern = re.compile(r"\b(?:" + "|".join(boundary_words) + r")\b", re.IGNORECASE)
+
+    last_end = None
+    for match in pattern.finditer(cleaned):
+        last_end = match.end()
+    if last_end is None:
+        return cleaned
+
+    return cleaned[last_end:].lstrip(" ,.-:!?").strip()

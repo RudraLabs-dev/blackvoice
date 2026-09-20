@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import time
+
 import pytest
 
 from blackvoice.audio.wake import strip_wake_word
@@ -96,6 +99,92 @@ def test_timer_without_a_duration(ctx: SkillContext) -> None:
     skill.shutdown()
 
 
+# ------------------------------------------------ timer persistence across restarts
+#
+# threading.Timer lives only as long as the process does - a restart (a
+# crash, an upgrade, the lock/unlock cycle found to kill blackvoice.service
+# on a real machine) silently dropped every pending timer and reminder with
+# nothing left to show it had ever existed. These prove the fix from both
+# ends: a scheduled timer actually lands on disk, and a fresh UtilsSkill
+# picks a still-pending one back up rather than only starting empty.
+def _timers_file(tmp_path, monkeypatch):
+    path = tmp_path / "timers.json"
+    monkeypatch.setattr("blackvoice.skills.utils.TIMERS_FILE", path)
+    return path
+
+
+def test_scheduling_a_timer_persists_it(ctx: SkillContext, tmp_path, monkeypatch) -> None:
+    path = _timers_file(tmp_path, monkeypatch)
+    skill = UtilsSkill(ctx)
+
+    skill.handle(Intent("t", "utils", "timer", {"amount": "5", "unit": "minute"}))
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert len(saved) == 1
+    (entry,) = saved.values()
+    assert entry["message"] == "Your timer is done."
+    assert entry["fire_at"] > time.time()
+    skill.shutdown()
+
+
+def test_shutdown_stops_the_live_timer_but_keeps_it_on_disk(
+    ctx: SkillContext, tmp_path, monkeypatch
+) -> None:
+    path = _timers_file(tmp_path, monkeypatch)
+    skill = UtilsSkill(ctx)
+    skill.handle(Intent("t", "utils", "timer", {"amount": "5", "unit": "minute"}))
+
+    skill.shutdown()
+
+    assert not any(t.is_alive() for t in skill._timers)
+    assert len(json.loads(path.read_text(encoding="utf-8"))) == 1, (
+        "a timer that has not fired yet must survive a restart, not be "
+        "deleted just because the process is shutting down"
+    )
+
+
+def test_a_still_pending_timer_is_rearmed_on_the_next_startup(
+    ctx: SkillContext, tmp_path, monkeypatch
+) -> None:
+    path = _timers_file(tmp_path, monkeypatch)
+    path.write_text(
+        json.dumps({"abc": {"fire_at": time.time() + 300, "message": "Your timer is done."}}),
+        encoding="utf-8",
+    )
+
+    skill = UtilsSkill(ctx)
+    try:
+        assert len(skill._timers) == 1
+        assert skill._timers[0].is_alive()
+        # Still pending, so restoring it must not have spoken it early.
+        assert json.loads(path.read_text(encoding="utf-8"))
+    finally:
+        skill.shutdown()
+
+
+def test_an_overdue_timer_fires_once_on_the_next_startup(
+    ctx: SkillContext, tmp_path, monkeypatch
+) -> None:
+    path = _timers_file(tmp_path, monkeypatch)
+    path.write_text(
+        json.dumps({"abc": {"fire_at": time.time() - 30, "message": "Reminder: call mom"}}),
+        encoding="utf-8",
+    )
+    spoken = []
+    ctx = SkillContext(config=ctx.config, bus=ctx.bus, say=spoken.append)
+
+    skill = UtilsSkill(ctx)
+    try:
+        assert spoken == ["Reminder: call mom"], (
+            "a reminder that was due while nothing was running must be "
+            "said once on restart, not silently dropped"
+        )
+        assert not skill._timers, "nothing left to schedule for one already fired"
+        assert json.loads(path.read_text(encoding="utf-8")) == {}
+    finally:
+        skill.shutdown()
+
+
 # ------------------------------------------------------------------ wake word
 @pytest.mark.parametrize(
     "heard,expected",
@@ -104,7 +193,17 @@ def test_timer_without_a_duration(ctx: SkillContext) -> None:
         ("Black, open firefox", "open firefox"),
         ("black", ""),
         ("open firefox", "open firefox"),
-        ("blackboard is here", "board is here"),  # known trade-off, see the docstring
+        # Word-boundary matched, not a bare prefix: "blackboard" no longer
+        # loses its first syllable to a false match on "black".
+        ("blackboard is here", "blackboard is here"),
+        # A repeated attempt, captured as one utterance because the second
+        # "Black" came before the endpointer's silence timeout - keep only
+        # what was said after the last one, not the abandoned first try.
+        ("open firefox black open firefox", "open firefox"),
+        (
+            "set volume to 40 black set a timer black set a timer black set a timer",
+            "set a timer",
+        ),
     ],
 )
 def test_strip_wake_word(heard: str, expected: str) -> None:
