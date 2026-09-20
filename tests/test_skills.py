@@ -185,36 +185,46 @@ def test_spawn_pins_the_working_directory_to_home(monkeypatch, tmp_path) -> None
 
 
 # --------------------------------------------------------------------------- #
-# Skill.spawn: a launched app must land in its own transient scope, not as a
+# Skill.spawn: a launched app must land in its own transient unit, not as a
 # direct child of blackvoice's own service unit - a real machine reported
-# "open firefox" saying it opened while no firefox process ever appeared, and
-# reproducing it live traced this to snapd refusing to run Firefox's snap
-# under blackvoice.service's own cgroup ("... is not a snap cgroup for tag
-# snap.firefox.firefox"), a check confirmed to pass once the same launch is
-# wrapped in `systemd-run --user --scope` - the same shape of cgroup a normal
-# login session's own session-N.scope already gives an app started by hand.
+# "open firefox" saying it opened while no firefox process ever appeared.
+# Three things had to be true before it actually did, each found by
+# reproducing the exact failure live rather than guessing:
 #
-# That alone still was not enough: a bare `--user --scope` does not forward
-# the caller's environment either, and a real launch (unlike `--version`,
-# which needs no display at all) then failed a second, different way -
-# "Error: no DISPLAY environment variable specified" - even though
-# blackvoice.service's own process already has DISPLAY, WAYLAND_DISPLAY,
-# XAUTHORITY and DBUS_SESSION_BUS_ADDRESS, being tied to
-# graphical-session.target. `--setenv=NAME` with no value pulls that name
-# from systemd-run's own environment - confirmed on a real machine: with it,
-# Firefox's full process tree (parent, content processes, the lot) actually
-# came up.
+# 1. snapd refuses to run Firefox's snap under blackvoice.service's own
+#    cgroup ("... is not a snap cgroup for tag snap.firefox.firefox") -
+#    fixed by giving it its own unit at all.
+# 2. systemd-run does not forward the caller's environment to that unit, and
+#    a real launch (unlike `--version`, which needs no display) then failed
+#    a second way - "Error: no DISPLAY environment variable specified" -
+#    even though blackvoice.service's own process already has DISPLAY,
+#    WAYLAND_DISPLAY, XAUTHORITY and DBUS_SESSION_BUS_ADDRESS, being tied to
+#    graphical-session.target. `--setenv=NAME` with no value pulls that name
+#    from systemd-run's own environment instead.
+# 3. Even with both of those fixed, wrapping in `--scope` specifically still
+#    silently failed: `--scope` execs the target in place of systemd-run
+#    itself, so the new process is still a fork of blackvoice's own, and
+#    blackvoice.service runs with NoNewPrivileges=true - a bit the kernel
+#    makes permanent across every future exec once set. Firefox's snap needs
+#    to gain capabilities via a setuid/file-capability binary to start at
+#    all, which that bit blocks: "snap-confine is packaged without necessary
+#    permissions ... capability cap_dac_override not found". Dropping
+#    `--scope` for systemd-run's default (a transient *service*) routes the
+#    fork through the --user manager instead - a process that was never
+#    subject to blackvoice.service's own NoNewPrivileges - and that is what
+#    finally got Firefox's full process tree (parent, content processes,
+#    the lot) actually running.
 # --------------------------------------------------------------------------- #
 @pytest.fixture(autouse=True)
-def _clear_scope_wrapper_cache():
-    from blackvoice.skills.base import _scope_wrapper
+def _clear_launch_wrapper_cache():
+    from blackvoice.skills.base import _detached_launch_wrapper
 
-    _scope_wrapper.cache_clear()
+    _detached_launch_wrapper.cache_clear()
     yield
-    _scope_wrapper.cache_clear()
+    _detached_launch_wrapper.cache_clear()
 
 
-def test_spawn_wraps_the_launch_in_its_own_scope_when_systemd_run_exists(
+def test_spawn_wraps_the_launch_in_its_own_unit_when_systemd_run_exists(
     monkeypatch, tmp_path
 ) -> None:
     from pathlib import Path
@@ -232,11 +242,14 @@ def test_spawn_wraps_the_launch_in_its_own_scope_when_systemd_run_exists(
 
     assert Skill.spawn(["firefox"]) is True
     assert calls[0] == [
-        "/usr/bin/systemd-run", "--user", "--scope", "--quiet",
+        "/usr/bin/systemd-run", "--user", "--collect", "--quiet",
         "--setenv=DISPLAY", "--setenv=WAYLAND_DISPLAY",
         "--setenv=XAUTHORITY", "--setenv=DBUS_SESSION_BUS_ADDRESS",
         "--", "firefox",
     ]
+    # Not --scope: see the module comment above for why that specifically
+    # still failed even with a correct cgroup and a correct environment.
+    assert "--scope" not in calls[0]
 
 
 def test_spawn_falls_back_to_a_bare_launch_without_systemd_run(

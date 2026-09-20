@@ -19,33 +19,54 @@ log = logging.getLogger(__name__)
 
 
 #: The display/session vars a GUI app needs, that ``systemd-run`` does not
-#: forward to the new scope on its own - confirmed live: even though
+#: forward to the new unit on its own - confirmed live: even though
 #: blackvoice.service's own process already has every one of these (it runs
-#: under graphical-session.target), a scope started with bare ``--user
-#: --scope`` gave the spawned app none of them, and Firefox exited with
-#: "Error: no DISPLAY environment variable specified" before ever opening a
-#: window. ``--setenv=NAME`` with no ``=value`` tells systemd-run to read the
-#: value from its own environment - i.e. blackvoice's, since nothing here
-#: overrides ``Popen``'s ``env`` - and hand that through instead.
-_SCOPE_ENV_PASSTHROUGH = (
+#: under graphical-session.target), the spawned app got none of them, and
+#: Firefox exited with "Error: no DISPLAY environment variable specified"
+#: before ever opening a window. ``--setenv=NAME`` with no ``=value`` tells
+#: systemd-run to read the value from its own environment - i.e.
+#: blackvoice's, since nothing here overrides ``Popen``'s ``env`` - and hand
+#: that through instead.
+_UNIT_ENV_PASSTHROUGH = (
     "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS",
 )
 
 
 @functools.lru_cache(maxsize=1)
-def _scope_wrapper() -> List[str]:
-    """Prefix that gives a spawned GUI app its own transient scope unit.
+def _detached_launch_wrapper() -> List[str]:
+    """Prefix that hands a spawned GUI app its own transient unit, forked by
+    the systemd --user manager rather than by this process.
+
+    Deliberately *not* ``--scope``: that mode has systemd-run exec the
+    target in place of itself, so the new process is still a fork of
+    blackvoice's own - and blackvoice.service runs with
+    ``NoNewPrivileges=true`` (see packaging/blackvoice.service), a bit the
+    kernel makes permanent across every future exec once set. Confirmed
+    live: even inside a scope with a correct cgroup and a correct
+    environment, Firefox's snap still would not start - "snap-confine is
+    packaged without necessary permissions ... required permitted
+    capability cap_dac_override not found" - because snap-confine itself
+    needs to gain capabilities via a setuid/file-capability binary, which
+    NoNewPrivileges blocks for the whole process tree, permanently, no
+    matter how the process is later re-execed. Dropping ``--scope`` in
+    favour of systemd-run's default (a transient *service*) routes the
+    actual fork through the --user manager instead, a process that was
+    never subject to blackvoice.service's own NoNewPrivileges - confirmed
+    live to fix exactly this, with the identical launch otherwise unchanged.
+    ``--collect`` clears the unit away once it exits either way, so a
+    string of "open firefox" attempts does not leave failed units behind
+    for `systemctl --user status` to report on forever.
 
     Empty wherever ``systemd-run`` is not there to give it - anywhere but a
     real systemd user session - so :meth:`Skill.spawn` falls back to exactly
-    today's direct ``Popen`` in that case.
+    a plain ``Popen`` in that case.
     """
     binary = shutil.which("systemd-run")
     if not binary:
         return []
     return (
-        [binary, "--user", "--scope", "--quiet"]
-        + [f"--setenv={name}" for name in _SCOPE_ENV_PASSTHROUGH]
+        [binary, "--user", "--collect", "--quiet"]
+        + [f"--setenv={name}" for name in _UNIT_ENV_PASSTHROUGH]
         + ["--"]
     )
 
@@ -136,26 +157,18 @@ class Skill(ABC):
         unit or a manual `cd` left the working directory), and a user has no
         way to tell that apart from the assistant actually reporting a path.
 
-        Run through ``systemd-run --user --scope`` when it is available,
-        rather than as a direct child of this process. On a real desktop
-        install blackvoice itself normally runs as a systemd user *service*
-        (see packaging/blackvoice.service), and a plain ``Popen`` child
-        inherits that service unit's own cgroup - which is not a session or
-        scope. A snap-packaged app (Firefox, on Ubuntu, by default) checks
-        its cgroup against snapd's confinement rules and refuses to run
-        under one that is not: confirmed live, it exits immediately with
-        "... is not a snap cgroup for tag snap.firefox.firefox", after
-        Popen has already returned successfully - so nothing here saw a
-        failure, and the assistant reported "Opening firefox" for an app
-        that was never actually running. Handing it its own transient scope
-        unit - the same shape of cgroup a normal login session's own
-        session-N.scope already gives an app launched by hand - is what
-        satisfies that check; confirmed by reproducing the exact failure
-        from inside the service's cgroup and seeing it succeed once wrapped
-        this way, in isolation from whatever else is on this machine.
+        Run through ``systemd-run --user`` when it is available, rather than
+        as a direct child of this process - see
+        :func:`_detached_launch_wrapper` for why plainly wrapping it, or
+        wrapping it in a scope, both still were not enough on a real
+        machine, and why a transient *service* is. On a real desktop install
+        blackvoice itself normally runs as a systemd user service (see
+        packaging/blackvoice.service), and a launched app has no business
+        being confined - or granted, or denied - by rules meant for the
+        assistant's own process, only for its own.
         """
         log.debug("spawning %s", argv)
-        wrapper = _scope_wrapper()
+        wrapper = _detached_launch_wrapper()
         try:
             subprocess.Popen(
                 [*wrapper, *argv],
