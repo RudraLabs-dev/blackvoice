@@ -54,7 +54,7 @@ def test_identical_text_has_no_edits() -> None:
 
 
 def test_one_substitution() -> None:
-    assert evaluate.word_edits("firefox kholo", "firefox hollow") == (1, 2)
+    assert evaluate.word_edits("open firefox", "open firefly") == (1, 2)
 
 
 def test_insertion_and_deletion() -> None:
@@ -115,7 +115,7 @@ def test_intent_accuracy_only_counts_commands() -> None:
     result = evaluate.BackendResult("test")
     result.results = [
         _row("open firefox", "open firefox", 0, 2, expected="open_app", got="open_app"),
-        _row("firefox kholo", "firefox hollow", 1, 2, expected="open_app", got="ask"),
+        _row("open chrome", "open crome", 1, 2, expected="open_app", got="ask"),
         # A question: not a command, so it is outside the measurement.
         _row("who wrote it", "who wrote it", 0, 3, expected="ask", got="ask"),
     ]
@@ -127,9 +127,9 @@ def test_failures_lists_the_misrouted_commands() -> None:
     result = evaluate.BackendResult("test")
     result.results = [
         _row("open firefox", "open firefox", 0, 2),
-        _row("firefox kholo", "nonsense", 2, 2, got="ask"),
+        _row("open chrome", "nonsense", 2, 2, got="ask"),
     ]
-    assert [r.sample.reference for r in result.failures] == ["firefox kholo"]
+    assert [r.sample.reference for r in result.failures] == ["open chrome"]
 
 
 def test_exact_match_uses_the_same_normalisation() -> None:
@@ -160,14 +160,14 @@ def test_an_empty_result_does_not_divide_by_zero() -> None:
 # --------------------------------------------------------------------------- #
 def test_manifest_round_trip(tmp_path) -> None:
     root = tmp_path / "eval"
-    evaluate.append_sample(root, evaluate.Sample("0001.wav", "firefox kholo"))
+    evaluate.append_sample(root, evaluate.Sample("0001.wav", "open chrome"))
     evaluate.append_sample(
         root, evaluate.Sample("0002.wav", "volume 40", intent="volume_set", note="noisy")
     )
 
     samples = evaluate.load_corpus(root)
     assert [s.audio for s in samples] == ["0001.wav", "0002.wav"]
-    assert samples[0].reference == "firefox kholo"
+    assert samples[0].reference == "open chrome"
     assert samples[1].intent == "volume_set"
     assert samples[1].note == "noisy"
 

@@ -11,7 +11,7 @@ pip install -e ".[all,dev]"
 pytest -q
 ```
 
-165 tests should pass in under a second. None of them need a microphone, a
+429 tests should pass in under a second. None of them need a microphone, a
 display or a network connection.
 
 ## Working without a microphone
@@ -20,7 +20,7 @@ Most of the system can be exercised from the terminal:
 
 ```bash
 blackvoice text                       # interactive
-blackvoice text "firefox kholo"       # one command
+blackvoice text "open firefox"        # one command
 blackvoice -v text "volume 40"        # with debug logging
 ```
 
