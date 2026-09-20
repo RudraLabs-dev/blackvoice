@@ -35,6 +35,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 MODELS_DIR = DATA_DIR / "models"
 NOTES_FILE = DATA_DIR / "notes.md"
 HISTORY_FILE = DATA_DIR / "history.jsonl"
+TIMERS_FILE = DATA_DIR / "timers.json"
 LOG_FILE = CACHE_DIR / "blackvoice.log"
 
 #: Where the distribution packages put the native helpers they bundle

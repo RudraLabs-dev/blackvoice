@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import ast
+import json
 import logging
 import operator
 import threading
+import time
 import urllib.parse
+import uuid
 from datetime import datetime
 from typing import Callable, Dict, List, Optional
 
-from ..config import NOTES_FILE
+from ..config import NOTES_FILE, TIMERS_FILE
 from ..nlu.intents import Intent
 from .base import Reply, Skill, SkillContext
 
@@ -36,6 +39,8 @@ class UtilsSkill(Skill):
     def __init__(self, ctx: SkillContext) -> None:
         super().__init__(ctx)
         self._timers: List[threading.Timer] = []
+        self._timers_lock = threading.Lock()
+        self._restore_timers()
 
     def handle(self, intent: Intent) -> Reply:
         handler = getattr(self, f"_do_{intent.action}", None)
@@ -44,6 +49,12 @@ class UtilsSkill(Skill):
         return handler(intent)
 
     def shutdown(self) -> None:
+        # Only the live threading.Timer objects are stopped here - the
+        # persisted file is left untouched. Its fire times are still in the
+        # future, and _restore_timers re-arms every one of them from there
+        # the next time this skill starts, which is the whole point: a timer
+        # set before the assistant restarts (a crash, an upgrade, a reboot)
+        # must not simply vanish.
         for timer in self._timers:
             timer.cancel()
         self._timers.clear()
@@ -116,10 +127,18 @@ class UtilsSkill(Skill):
         return value * multiplier if multiplier else None
 
     def _schedule(self, seconds: int, message: str) -> None:
+        entry_id = uuid.uuid4().hex
+        self._persist_upsert(entry_id, time.time() + seconds, message)
+        self._arm(entry_id, seconds, message)
+
+    def _arm(self, entry_id: str, seconds: float, message: str) -> None:
+        """Start the in-memory countdown for an already-persisted entry."""
+
         def _fire() -> None:
             log.info("timer fired: %s", message)
             self.ctx.say(message)
             self._notify("Black Voice", message)
+            self._persist_remove(entry_id)
 
         timer = threading.Timer(seconds, _fire)
         timer.daemon = True
@@ -127,6 +146,78 @@ class UtilsSkill(Skill):
         self._timers.append(timer)
         # Drop timers that have already run so the list does not grow forever.
         self._timers = [t for t in self._timers if t.is_alive()]
+
+    # ------------------------------------------------- timer persistence
+    #
+    # A threading.Timer lives only as long as this process does - restarting
+    # the service (a crash, an upgrade, the lock/unlock cycle that was found
+    # to kill it) silently dropped every pending timer and reminder with no
+    # trace either survived. Recorded here as {id: {fire_at, message}} under
+    # TIMERS_FILE and replayed by _restore_timers on the next startup, the
+    # same shape of fix as the notes file already gets from living in
+    # DATA_DIR rather than memory.
+    def _persist_upsert(self, entry_id: str, fire_at: float, message: str) -> None:
+        with self._timers_lock:
+            entries = self._read_persisted()
+            entries[entry_id] = {"fire_at": fire_at, "message": message}
+            self._write_persisted(entries)
+
+    def _persist_remove(self, entry_id: str) -> None:
+        with self._timers_lock:
+            entries = self._read_persisted()
+            if entries.pop(entry_id, None) is not None:
+                self._write_persisted(entries)
+
+    @staticmethod
+    def _read_persisted() -> Dict[str, dict]:
+        if not TIMERS_FILE.exists():
+            return {}
+        try:
+            data = json.loads(TIMERS_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            log.warning("%s is unreadable; starting with no saved timers", TIMERS_FILE)
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _write_persisted(entries: Dict[str, dict]) -> None:
+        try:
+            TIMERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            TIMERS_FILE.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+        except OSError:
+            log.debug("could not persist timers to %s", TIMERS_FILE, exc_info=True)
+
+    def _restore_timers(self) -> None:
+        entries = self._read_persisted()
+        if not entries:
+            return
+
+        now = time.time()
+        changed = False
+        for entry_id, entry in list(entries.items()):
+            fire_at = entry.get("fire_at") if isinstance(entry, dict) else None
+            message = entry.get("message") if isinstance(entry, dict) else None
+            if not isinstance(fire_at, (int, float)) or not isinstance(message, str) or not message:
+                del entries[entry_id]
+                changed = True
+                continue
+
+            delay = fire_at - now
+            if delay <= 0:
+                # It was due while nothing was running to say it. Firing it
+                # once, late, on the next startup beats a reminder the user
+                # is still waiting on just quietly never happening.
+                log.info("firing overdue timer on restart: %s", message)
+                self.ctx.say(message)
+                self._notify("Black Voice", message)
+                del entries[entry_id]
+                changed = True
+                continue
+
+            self._arm(entry_id, delay, message)
+
+        if changed:
+            self._write_persisted(entries)
 
     def _notify(self, title: str, body: str) -> None:
         if not self.config.ui.show_notifications:

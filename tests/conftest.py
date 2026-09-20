@@ -1,4 +1,4 @@
-"""Test isolation for anything that touches "the config file".
+"""Test isolation for anything that touches a real per-user file.
 
 :meth:`blackvoice.config.Config.save` and ``.load`` default to the module
 global ``CONFIG_FILE`` - the real ``~/.config/blackvoice/config.json`` -
@@ -20,6 +20,17 @@ closes this: ``Config.save``/``Config.load`` look it up from
 ``blackvoice.config``'s own module namespace at call time, so every call
 anywhere in the codebase is covered, including ones - like
 ``apply_config`` - the test author never has to remember to isolate.
+
+``TIMERS_FILE`` gets the same treatment, pre-emptively rather than after a
+second incident: UtilsSkill now persists timers/reminders to it so they
+survive a restart (see skills/utils.py), read and written from
+``blackvoice.skills.utils``'s own imported name - a plain ``from ..config
+import TIMERS_FILE`` binds it into that module's namespace at import time, so
+patching ``blackvoice.config.TIMERS_FILE`` alone would not reach it, the same
+gap that let the CONFIG_FILE incident happen. Existing tests already
+monkeypatch ``blackvoice.skills.utils.NOTES_FILE`` per-test for the same
+reason (see test_skills.py) - patched here too as a global backstop, so a
+test that forgets to still cannot reach a real machine's file.
 """
 
 from __future__ import annotations
@@ -27,8 +38,17 @@ from __future__ import annotations
 import pytest
 
 import blackvoice.config as _config
+import blackvoice.skills.utils as _utils
 
 
 @pytest.fixture(autouse=True)
 def _isolated_config_file(tmp_path, monkeypatch):
     monkeypatch.setattr(_config, "CONFIG_FILE", tmp_path / "config.json")
+
+    timers_file = tmp_path / "timers.json"
+    monkeypatch.setattr(_config, "TIMERS_FILE", timers_file)
+    monkeypatch.setattr(_utils, "TIMERS_FILE", timers_file)
+
+    notes_file = tmp_path / "notes.md"
+    monkeypatch.setattr(_config, "NOTES_FILE", notes_file)
+    monkeypatch.setattr(_utils, "NOTES_FILE", notes_file)
