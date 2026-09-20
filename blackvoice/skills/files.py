@@ -98,7 +98,25 @@ class FilesSkill(Skill):
     def _do_find(self, intent: Intent) -> Reply:
         query = (intent.slots.get("query") or "").strip()
         if not query:
-            return Reply.error("What should I look for?")
+            # "find a file", with no name given - asked for directly rather
+            # than handed to the AI skill and hoping it calls a tool with
+            # whatever comes back. Confirmed live that hope does not pay
+            # off: asked to find a file, then given a real file name the
+            # very next turn, qwen2.5:1.5b just acknowledged the name back
+            # in conversation and never actually searched for anything.
+            # Reply.needs/on_answer instead routes the next thing said
+            # straight back here as the query, deterministically.
+            return Reply(
+                "What should I look for?",
+                needs="What should I look for?",
+                on_answer=self._find_with_query,
+            )
+        return self._find_with_query(query)
+
+    def _find_with_query(self, query: str) -> Reply:
+        query = (query or "").strip()
+        if not query:
+            return Reply.error("I did not catch a file name.")
 
         matches = self._search(query)
         if not matches:

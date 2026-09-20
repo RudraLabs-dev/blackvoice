@@ -50,7 +50,7 @@ log = logging.getLogger(__name__)
 
 #: Topics forwarded to every connected client as {"event": topic, ...payload}.
 #: LEVEL is left out - it fires many times a second and no client needs it yet.
-_FORWARDED_TOPICS = (Topic.STATE, Topic.HEARD, Topic.REPLY, Topic.CONFIRM)
+_FORWARDED_TOPICS = (Topic.STATE, Topic.HEARD, Topic.REPLY, Topic.CONFIRM, Topic.ASK)
 
 #: Longest line accepted from a client, to bound memory from a runaway sender.
 _MAX_LINE = 1 << 20

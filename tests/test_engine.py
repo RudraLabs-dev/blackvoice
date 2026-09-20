@@ -134,6 +134,102 @@ def test_a_second_command_cancels_the_pending_confirmation(engine: Engine) -> No
     assert not skill.ran, "a confirmation must not survive an intervening command"
 
 
+# --------------------------------------------------------------------------- #
+# PendingSlot: a skill needs one piece of free-text info, not a yes/no
+# --------------------------------------------------------------------------- #
+class Asking(Skill):
+    """A skill that always asks for one piece of information before acting."""
+
+    name = "demo2"
+
+    def __init__(self, ctx) -> None:
+        super().__init__(ctx)
+        self.received = None
+
+    def handle(self, intent: Intent) -> Reply:
+        def _answer(text: str) -> Reply:
+            self.received = text
+            return Reply(f"Got it: {text}.")
+
+        return Reply("What should I use?", needs="What should I use?", on_answer=_answer)
+
+
+def _arm_slot(engine: Engine) -> Asking:
+    """Register the asking demo skill and send "do the other thing" to it.
+
+    Same shape as _arm above: every other non-answer command routes to
+    control.help, a real command that never arms a slot of its own, so a
+    test can send an unrelated intervening command without it masking
+    whether the *original* pending slot survived.
+    """
+    skill = Asking(SkillContext(config=engine.config, bus=engine.bus))
+    engine.skills.register(skill)
+
+    def _route(text: str) -> Intent:
+        if text == "do the other thing":
+            return Intent("demo2", "demo2", "do", text=text)
+        return Intent("help", "control", "help", text=text)
+
+    engine.router.route = _route
+    return skill
+
+
+def test_pending_slot_hands_the_next_utterance_to_on_answer(engine: Engine) -> None:
+    skill = _arm_slot(engine)
+
+    first = engine.process("do the other thing")
+    assert first.needs == "What should I use?"
+    assert skill.received is None
+
+    second = engine.process("purple")
+    assert skill.received == "purple"
+    assert second.speech == "Got it: purple."
+
+
+def test_pending_slot_answer_is_not_routed_through_the_nlu(engine: Engine) -> None:
+    """Unlike a confirmation, anything said next is the answer - even text
+    that would otherwise match a real command - since the question already
+    established that whatever comes next is being asked for, not issued as
+    a new instruction.
+    """
+    skill = _arm_slot(engine)
+    engine.process("do the other thing")
+
+    engine.process("do the other thing")  # would normally re-arm a fresh slot
+
+    assert skill.received == "do the other thing"
+
+
+def test_pending_slot_expires(engine: Engine, monkeypatch) -> None:
+    from blackvoice.app import PendingSlot
+
+    skill = _arm_slot(engine)
+    engine.process("do the other thing")
+
+    monkeypatch.setattr(PendingSlot, "expired", property(lambda self: True))
+
+    engine.process("purple")
+    assert skill.received is None, "an expired slot must not be answered"
+
+
+def test_pending_slot_is_consumed_exactly_once(engine: Engine) -> None:
+    """A slot cannot be answered twice: unlike a confirmation, there is no
+    way to tell "that was not really an answer" from free text alone, so it
+    is deliberately unconditional the *one* time it is live - and gone
+    afterwards regardless of what came in, not lingering for a later "purple"
+    to land on by surprise.
+    """
+    skill = _arm_slot(engine)
+    engine.process("do the other thing")
+
+    engine.process("purple")
+    assert skill.received == "purple"
+
+    skill.received = None
+    engine.process("purple")  # nothing pending now - routes normally instead
+    assert skill.received is None
+
+
 def test_reply_is_published(engine: Engine) -> None:
     received = []
     engine.bus.subscribe(Topic.REPLY, lambda e: received.append(e.payload))

@@ -26,6 +26,7 @@ class Topic:
     REPLY = "reply"                 # assistant's answer
     ERROR = "error"
     CONFIRM = "confirm"             # a skill needs a yes/no from the user
+    ASK = "ask"                     # a skill needs one piece of free-text info
     LEVEL = "level"                 # mic level, 0..1, for the waveform
     SHUTDOWN = "shutdown"
 

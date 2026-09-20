@@ -139,6 +139,8 @@ Reply(
     ok=True,
     confirm=None,            # set to ask before acting
     on_confirm=None,         # callable returning another Reply
+    needs=None,              # set to ask for one missing piece of info
+    on_answer=None,          # callable(str) -> Reply, given the answer as-is
     data={},                 # structured result, useful in tests
 )
 ```
@@ -167,6 +169,40 @@ def _do_delete_everything(self, intent: Intent) -> Reply:
 
 The engine holds `on_confirm` for 30 seconds. Yes runs it; no, stop, a different
 command, or the timeout all discard it. You do not have to handle any of that.
+
+## Asking for missing information
+
+Return a `Reply` with `needs` and `on_answer` when a command is missing one
+piece of free-text information you already know how to ask for yourself - a
+file name, a duration, what to write down:
+
+```python
+def _do_find(self, intent: Intent) -> Reply:
+    query = (intent.slots.get("query") or "").strip()
+    if not query:
+        return Reply(
+            "What should I look for?",
+            needs="What should I look for?",
+            on_answer=self._find_with_query,
+        )
+    return self._find_with_query(query)
+
+def _find_with_query(self, query: str) -> Reply:
+    ...  # the real search, run either way
+```
+
+Unlike `confirm`, whatever is said next is handed to `on_answer` exactly as
+heard - it is not routed through the NLU again, since the question already
+established that it is the answer, not a new command to interpret. It is also
+a one-shot: answered or not, it does not survive a second thing being said,
+so nothing said later can land on a question the user has moved on from.
+
+Reach for this instead of falling through to the AI skill and hoping a local
+model asks the same question and then actually acts on the answer - confirmed
+live that it does not reliably: a small model, asked to find a file and then
+given a real name the next turn, acknowledged the name back in conversation
+and never searched for anything. `needs`/`on_answer` is deterministic - no
+model in the loop at all for that back-and-forth.
 
 ## Helpers on `Skill`
 

@@ -13,6 +13,7 @@ from blackvoice.core.bus import EventBus
 from blackvoice.nlu.intents import Intent
 from blackvoice.skills.base import Reply, SkillContext, SkillRegistry, Skill
 from blackvoice.skills.control import ControlSkill
+from blackvoice.skills.files import FilesSkill
 from blackvoice.skills.utils import UtilsSkill
 
 
@@ -381,5 +382,76 @@ def test_commands_work_without_any_ai_backend(ctx: SkillContext) -> None:
         question = engine.process("why is the sky blue")
         assert not question.ok
         assert "switched off" in question.speech
+    finally:
+        engine.stop()
+
+
+# --------------------------------------------------------------------------- #
+# find with no name: asks deterministically, does not hand it to the AI skill
+#
+# Confirmed live that hoping a local model would ask for a name and then
+# actually search does not pay off: qwen2.5:1.5b, given "find a file" and
+# then a real file name the very next turn, just acknowledged the name back
+# in conversation and never called a tool. Reply.needs/on_answer routes the
+# next thing said straight back to FilesSkill._find_with_query instead,
+# deterministically - no model in the loop for this at all.
+# --------------------------------------------------------------------------- #
+def test_find_with_no_name_asks_for_one_deterministically(ctx: SkillContext) -> None:
+    skill = FilesSkill(ctx)
+    reply = skill.handle(Intent("find_file", "files", "find", {}))
+
+    assert reply.ok, "a clarifying question is not a failure"
+    assert reply.needs == "What should I look for?"
+    assert callable(reply.on_answer)
+
+
+def test_answering_the_asked_name_actually_searches(ctx: SkillContext, monkeypatch) -> None:
+    from pathlib import Path
+
+    skill = FilesSkill(ctx)
+    expected = Path("/home/x") / "report.pdf"
+    monkeypatch.setattr(skill, "_search", lambda query: [Path("/home/x") / query])
+
+    reply = skill.handle(Intent("find_file", "files", "find", {}))
+    found = reply.on_answer("report.pdf")
+
+    assert found.ok
+    assert "report.pdf" in found.speech
+    assert found.data["matches"] == [str(expected)]
+
+
+def test_find_with_a_name_already_given_skips_the_question(
+    ctx: SkillContext, monkeypatch
+) -> None:
+    from pathlib import Path
+
+    skill = FilesSkill(ctx)
+    monkeypatch.setattr(skill, "_search", lambda query: [Path(f"/home/x/{query}")])
+
+    reply = skill.handle(Intent("find_file", "files", "find", {"query": "report.pdf"}))
+
+    assert reply.needs is None
+    assert "report.pdf" in reply.speech
+
+
+def test_the_full_conversation_actually_finds_the_file(ctx: SkillContext, monkeypatch) -> None:
+    """The same round trip end to end, through Engine.process - what a real
+    "find a file" ... "report.pdf" exchange looks like from the outside.
+    """
+    from pathlib import Path
+
+    from blackvoice.app import Engine
+
+    ctx.config.ai.provider = "none"
+    engine = Engine(ctx.config)
+    files_skill = engine.skills.get("files")
+    monkeypatch.setattr(files_skill, "_search", lambda query: [Path(f"/home/x/{query}")])
+    try:
+        first = engine.process("find a file")
+        assert first.speech == "What should I look for?"
+
+        second = engine.process("report.pdf")
+        assert second.ok
+        assert "report.pdf" in second.speech
     finally:
         engine.stop()

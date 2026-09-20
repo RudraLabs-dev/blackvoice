@@ -57,6 +57,29 @@ class PendingConfirmation:
         return time.monotonic() - self.created > self.TTL
 
 
+class PendingSlot:
+    """A skill is missing one piece of free-text information and is waiting
+    for it - a file name, a duration, what to write down. Unlike
+    :class:`PendingConfirmation`, the next utterance is not routed through
+    the NLU at all; it is handed to ``on_answer`` exactly as heard, since it
+    was already the answer to a question this skill itself asked, not a new
+    command to interpret.
+    """
+
+    #: matches PendingConfirmation.TTL - answer within the same window a
+    #: yes/no would need to land in
+    TTL = 30.0
+
+    def __init__(self, prompt: str, on_answer: Callable[[str], Reply]) -> None:
+        self.prompt = prompt
+        self.on_answer = on_answer
+        self.created = time.monotonic()
+
+    @property
+    def expired(self) -> bool:
+        return time.monotonic() - self.created > self.TTL
+
+
 class Engine:
     def __init__(self, config: Optional[Config] = None) -> None:
         ensure_dirs()
@@ -96,6 +119,7 @@ class Engine:
         self._running = threading.Event()
         self._activate = threading.Event()
         self._pending: Optional[PendingConfirmation] = None
+        self._pending_slot: Optional[PendingSlot] = None
         self._lock = threading.RLock()
         self._thread: Optional[threading.Thread] = None
 
@@ -534,18 +558,22 @@ class Engine:
         """Route ``text`` to a skill and return its reply."""
         with self._lock:
             pending = self._pending
-            # Consumed here unconditionally, not only once answered: a
-            # pending confirmation gets exactly one chance to be answered -
-            # the very next thing said - rather than staying live for up to
-            # PendingConfirmation.TTL seconds. Left as it was before this
-            # fix, an unrelated "yes" said for any other reason within that
-            # window - to a colleague, on a call, agreeing with something
-            # on screen - would silently run whatever had been proposed and
-            # forgotten, with nothing at that moment to connect the two.
-            # Confirmed live: exactly this shape of gap exists in
-            # blackvoice.skills.ai's run_command confirmation flow, though
-            # not observed to have actually fired on a real machine.
+            slot = self._pending_slot
+            # Both consumed here unconditionally, not only once answered: a
+            # pending confirmation or a pending slot each get exactly one
+            # chance to be answered - the very next thing said - rather than
+            # staying live for up to their own TTL. Left as it was before
+            # this fix (for the confirmation half), an unrelated "yes" said
+            # for any other reason within that window - to a colleague, on a
+            # call, agreeing with something on screen - would silently run
+            # whatever had been proposed and forgotten, with nothing at that
+            # moment to connect the two. Confirmed live: exactly this shape
+            # of gap exists in blackvoice.skills.ai's run_command
+            # confirmation flow, though not observed to have actually fired
+            # on a real machine.
             self._pending = None
+            self._pending_slot = None
+
             if pending is not None and not pending.expired:
                 answered = self._answer_confirmation(text, pending)
                 if answered is not None:
@@ -553,19 +581,42 @@ class Engine:
             elif pending is not None:
                 log.debug("pending confirmation expired")
 
+            # A pending slot takes whatever was just said as-is, unlike a
+            # confirmation: there is no yes/no to recognise first, since the
+            # question itself ("what file?") already established that
+            # anything heard next is the answer, not a new command to route.
+            if slot is not None and not slot.expired:
+                log.info("answering %r: %r", slot.prompt, text)
+                self._set_state(State.THINKING)
+                reply = slot.on_answer(text)
+                self._arm(reply)
+                return reply
+            elif slot is not None:
+                log.debug("pending slot expired")
+
         self._set_state(State.THINKING)
         intent = self.router.route(text)
         reply = self.skills.dispatch(intent)
+        self._arm(reply)
+        return reply
 
+    def _arm(self, reply: Reply) -> None:
+        """Set up whatever this reply is waiting on next, and any state
+        change it carries - shared by a fresh command and by the reply an
+        already-armed confirmation or slot itself produces, so a skill can
+        chain a second question ("which one?") off the answer to the first.
+        """
         if reply.confirm and reply.on_confirm:
             with self._lock:
                 self._pending = PendingConfirmation(reply.confirm, reply.on_confirm)
             self.bus.publish(Topic.CONFIRM, prompt=reply.confirm)
+        elif reply.needs and reply.on_answer:
+            with self._lock:
+                self._pending_slot = PendingSlot(reply.needs, reply.on_answer)
+            self.bus.publish(Topic.ASK, prompt=reply.needs)
 
         if reply.data.get("sleep"):
             self._set_state(State.ASLEEP)
-
-        return reply
 
     def _answer_confirmation(
         self, text: str, pending: PendingConfirmation

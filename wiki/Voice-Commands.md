@@ -92,6 +92,12 @@ non-English desktop.
 walk of your home directory, skipping `.git`, `node_modules`, caches and dotfiles.
 It returns at most 8 matches.
 
+Leave the name out - `find a file`, `search for the document` - and it asks
+"What should I look for?" and searches for whatever you say next, rather than
+needing the full command in one breath. That follow-up is not a new command:
+say anything at all and it is taken as the file name, searched for exactly as
+given.
+
 `create folder` strips anything that is not a letter, digit, space, hyphen or
 underscore, and only ever creates inside your home directory.
 

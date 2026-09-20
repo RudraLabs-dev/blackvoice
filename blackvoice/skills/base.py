@@ -83,6 +83,17 @@ class Reply:
     #: when set, the engine asks the user to confirm and re-invokes ``on_confirm``
     confirm: Optional[str] = None
     on_confirm: Optional[Callable[[], "Reply"]] = None
+    #: when set, the engine speaks this as a question and hands whatever the
+    #: user says next - as raw text, not routed through the NLU again -
+    #: straight to ``on_answer``. For a skill that is missing one piece of
+    #: information it already knows how to ask for itself (a file name, a
+    #: duration), rather than falling through to the AI skill and hoping a
+    #: small local model reliably decides to call a tool with it - confirmed
+    #: live that it does not: asked "find a file" then given a real file
+    #: name in the next turn, qwen2.5:1.5b just acknowledged the name back
+    #: in conversation and never actually searched for anything.
+    needs: Optional[str] = None
+    on_answer: Optional[Callable[[str], "Reply"]] = None
     data: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

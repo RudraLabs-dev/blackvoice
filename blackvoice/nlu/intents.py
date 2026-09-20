@@ -154,6 +154,14 @@ RULES: List[Rule] = [
     ]),
     Rule("find_file", "files", "find", [
         r"\b(?:find|search\s+for|locate|look\s+for)\s+(?:a\s+|the\s+)?(?:file|folder|document)s?\s+(?:named\s+|called\s+)?(?P<query>.+?)\s*$",
+        # The same verbs with no name at all - "find a file", "search for
+        # the document" - previously matched nothing here (the pattern
+        # above requires text after "file"/"folder"/"document") and fell
+        # through every rule to the AI skill instead, which asked for a
+        # name in conversation but then had nothing to actually do with the
+        # answer. FilesSkill._do_find's own "what should I look for?" is
+        # reached only if this is matched at all - this is what lets it be.
+        r"\b(?:find|search\s+for|locate|look\s+for)\s+(?:a\s+|the\s+)?(?:file|folder|document)s?\s*$",
     ]),
     Rule("open_folder", "files", "open_folder", [
         rf"^{_OPEN}\s+(?:my\s+|the\s+)?(?P<target>downloads?|documents?|desktop|pictures?|music|videos?|home|trash)(?:\s+(?:folder|directory))?\s*$",

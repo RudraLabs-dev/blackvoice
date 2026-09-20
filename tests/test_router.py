@@ -38,6 +38,12 @@ ENGLISH = [
     ("battery status", "system", "battery", {}),
     ("open downloads", "files", "open_folder", {"target": "downloads"}),
     ("find file report.pdf", "files", "find", {"query": "report.pdf"}),
+    # No name given - previously matched nothing here at all (the pattern
+    # above requires text after "file") and fell straight through to the AI
+    # skill instead of ever reaching FilesSkill._do_find's own "what should
+    # I look for?" - see test_find_with_no_name_asks_for_one below for the
+    # query slot itself, which stays absent rather than empty-string.
+    ("find a file", "files", "find", {}),
     ("disk space", "files", "disk_space", {}),
     ("run command df -h", "terminal", "run", {"command": "df -h"}),
     ("what time is it", "utils", "time", {}),
@@ -74,6 +80,21 @@ def test_questions_go_to_the_ai(router: Router, text: str) -> None:
     intent = router.route(text)
     assert intent.skill == "ai"
     assert intent.slots["question"] == text
+
+
+@pytest.mark.parametrize(
+    "text", ["find a file", "search for a file", "locate a document", "look for the folder"]
+)
+def test_find_with_no_name_still_reaches_the_files_skill(router: Router, text: str) -> None:
+    """Every phrasing of "find/search for/locate a file" with no name at
+    all must still reach files.find with an empty query, not fall through
+    every rule to the AI skill the way it used to - that is what lets
+    FilesSkill._do_find's own "what should I look for?" ever be reached.
+    """
+    intent = router.route(text)
+    assert intent.skill == "files"
+    assert intent.action == "find"
+    assert not intent.slots.get("query")
 
 
 def test_specific_rules_beat_the_generic_open_rule(router: Router) -> None:
