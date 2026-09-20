@@ -2,19 +2,34 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ..config import Config
 from ..core.bus import EventBus
 from ..nlu.intents import Intent
 
 log = logging.getLogger(__name__)
+
+
+@functools.lru_cache(maxsize=1)
+def _scope_wrapper() -> List[str]:
+    """Prefix that gives a spawned GUI app its own transient scope unit.
+
+    Empty wherever ``systemd-run`` is not there to give it - anywhere but a
+    real systemd user session - so :meth:`Skill.spawn` falls back to exactly
+    today's direct ``Popen`` in that case.
+    """
+    binary = shutil.which("systemd-run")
+    if not binary:
+        return []
+    return [binary, "--user", "--scope", "--quiet", "--"]
 
 
 @dataclass
@@ -102,11 +117,30 @@ class Skill(ABC):
         launched from (its own data directory, if that is where a systemd
         unit or a manual `cd` left the working directory), and a user has no
         way to tell that apart from the assistant actually reporting a path.
+
+        Run through ``systemd-run --user --scope`` when it is available,
+        rather than as a direct child of this process. On a real desktop
+        install blackvoice itself normally runs as a systemd user *service*
+        (see packaging/blackvoice.service), and a plain ``Popen`` child
+        inherits that service unit's own cgroup - which is not a session or
+        scope. A snap-packaged app (Firefox, on Ubuntu, by default) checks
+        its cgroup against snapd's confinement rules and refuses to run
+        under one that is not: confirmed live, it exits immediately with
+        "... is not a snap cgroup for tag snap.firefox.firefox", after
+        Popen has already returned successfully - so nothing here saw a
+        failure, and the assistant reported "Opening firefox" for an app
+        that was never actually running. Handing it its own transient scope
+        unit - the same shape of cgroup a normal login session's own
+        session-N.scope already gives an app launched by hand - is what
+        satisfies that check; confirmed by reproducing the exact failure
+        from inside the service's cgroup and seeing it succeed once wrapped
+        this way, in isolation from whatever else is on this machine.
         """
         log.debug("spawning %s", argv)
+        wrapper = _scope_wrapper()
         try:
             subprocess.Popen(
-                argv,
+                [*wrapper, *argv],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,

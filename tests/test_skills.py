@@ -184,6 +184,64 @@ def test_spawn_pins_the_working_directory_to_home(monkeypatch, tmp_path) -> None
     assert calls[0]["cwd"] == str(tmp_path)
 
 
+# --------------------------------------------------------------------------- #
+# Skill.spawn: a launched app must land in its own transient scope, not as a
+# direct child of blackvoice's own service unit - a real machine reported
+# "open firefox" saying it opened while no firefox process ever appeared, and
+# reproducing it live traced this to snapd refusing to run Firefox's snap
+# under blackvoice.service's own cgroup ("... is not a snap cgroup for tag
+# snap.firefox.firefox"), a check confirmed to pass once the same launch is
+# wrapped in `systemd-run --user --scope` - the same shape of cgroup a normal
+# login session's own session-N.scope already gives an app started by hand.
+# --------------------------------------------------------------------------- #
+@pytest.fixture(autouse=True)
+def _clear_scope_wrapper_cache():
+    from blackvoice.skills.base import _scope_wrapper
+
+    _scope_wrapper.cache_clear()
+    yield
+    _scope_wrapper.cache_clear()
+
+
+def test_spawn_wraps_the_launch_in_its_own_scope_when_systemd_run_exists(
+    monkeypatch, tmp_path
+) -> None:
+    from pathlib import Path
+
+    calls = []
+    monkeypatch.setattr(
+        "blackvoice.skills.base.shutil.which",
+        lambda name: "/usr/bin/systemd-run" if name == "systemd-run" else None,
+    )
+    monkeypatch.setattr(
+        "blackvoice.skills.base.subprocess.Popen",
+        lambda argv, **kwargs: calls.append(argv) or object(),
+    )
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+    assert Skill.spawn(["firefox"]) is True
+    assert calls[0] == [
+        "/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--", "firefox",
+    ]
+
+
+def test_spawn_falls_back_to_a_bare_launch_without_systemd_run(
+    monkeypatch, tmp_path
+) -> None:
+    from pathlib import Path
+
+    calls = []
+    monkeypatch.setattr("blackvoice.skills.base.shutil.which", lambda name: None)
+    monkeypatch.setattr(
+        "blackvoice.skills.base.subprocess.Popen",
+        lambda argv, **kwargs: calls.append(argv) or object(),
+    )
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+    assert Skill.spawn(["firefox"]) is True
+    assert calls[0] == ["firefox"]
+
+
 def test_commands_work_without_any_ai_backend(ctx: SkillContext) -> None:
     """Ollama is optional: only free-form questions need a backend."""
     from blackvoice.app import Engine
