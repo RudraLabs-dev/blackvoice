@@ -8,6 +8,7 @@ understand that".
 from __future__ import annotations
 
 import logging
+import re
 from typing import List, Optional
 
 from .intents import RULES, Intent, Rule, normalise
@@ -19,6 +20,27 @@ _QUESTION_HINTS = (
     "who", "what", "why", "how", "when", "where", "which", "explain", "tell me about",
 )
 
+#: A conversational opener stripped from the front of a command before it is
+#: matched against a rule. Every rule pattern here is written to match "open
+#: firefox", not "can you open firefox" - reported live: asking it that way
+#: instead fell through every rule to the AI skill, which does not run
+#: anything, just talks about it ("Sure, I can help you with that... Do you
+#: want me to do that?") for a command the assistant should have simply run.
+#: Repeated (the trailing ``+``) so a stacked opener like "please can you
+#: open firefox" is stripped in one pass rather than needing two.
+_PLEASANTRY = re.compile(
+    r"^(?:"
+    r"(?:can|could|would|will)\s+you\s+(?:please\s+)?|"
+    r"please\s+|"
+    r"i\s+(?:want|need)\s+(?:you\s+)?to\s+|"
+    r"i'd\s+like\s+(?:you\s+)?to\s+"
+    r")+"
+)
+
+
+def _drop_pleasantry(text: str) -> str:
+    return _PLEASANTRY.sub("", text, count=1)
+
 
 class Router:
     def __init__(self, rules: Optional[List[Rule]] = None) -> None:
@@ -28,6 +50,7 @@ class Router:
         cleaned = normalise(text)
         if not cleaned:
             return Intent("empty", "control", "noop", text=text)
+        cleaned = _drop_pleasantry(cleaned) or cleaned
 
         for rule in self.rules:
             intent = rule.match(cleaned)

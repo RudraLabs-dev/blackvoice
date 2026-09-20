@@ -16,6 +16,17 @@ def router() -> Router:
 ENGLISH = [
     ("open firefox", "system", "open_app", {"target": "firefox"}),
     ("close chrome", "system", "close_app", {"target": "chrome"}),
+    # A polite opener must not push the command to the AI skill instead of
+    # running it - reported live: "can you open firefox" got only talk back
+    # ("Sure, I can help you with that... Do you want me to do that?"),
+    # because every rule here is written to match "open firefox", not a
+    # sentence that happens to contain it.
+    ("can you open firefox", "system", "open_app", {"target": "firefox"}),
+    ("could you please open firefox", "system", "open_app", {"target": "firefox"}),
+    ("please open firefox", "system", "open_app", {"target": "firefox"}),
+    ("would you close chrome", "system", "close_app", {"target": "chrome"}),
+    ("i want to open firefox", "system", "open_app", {"target": "firefox"}),
+    ("i'd like to open firefox", "system", "open_app", {"target": "firefox"}),
     ("volume up", "system", "volume_up", {}),
     ("set volume to 40", "system", "volume_set", {"value": "40"}),
     ("mute", "system", "volume_mute", {}),
