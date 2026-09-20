@@ -134,6 +134,19 @@ class WakeConfig:
     hotkey: str = "Ctrl+Alt+Space"
     #: play a short beep when activated
     chime: bool = True
+    #: after replying, keep listening for a follow-up without needing the
+    #: wake word said again - the same "conversation mode" Alexa/Google
+    #: Assistant default to, rather than a fresh "Black" before every single
+    #: thing said
+    followup_enabled: bool = True
+    #: how long to wait for that follow-up before giving up quietly and
+    #: going back to waiting for the wake word. Deliberately shorter than
+    #: AudioConfig.max_command_seconds: a wake word says "I am about to
+    #: speak", so waiting the full command-length timeout is reasonable: a
+    #: follow-up is only maybe coming, and holding the mic open that long
+    #: on every single reply for a "maybe" would make the assistant look
+    #: like it is still listening long after most people have moved on.
+    followup_seconds: float = 6.0
 
 
 @dataclass

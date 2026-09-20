@@ -119,7 +119,9 @@ mishearing actually changed which command ran.
   "enabled": true,
   "phrases": ["black", "blek", "blak"],
   "hotkey": "Ctrl+Alt+Space",
-  "chime": true
+  "chime": true,
+  "followup_enabled": true,
+  "followup_seconds": 6.0
 }
 ```
 
@@ -128,10 +130,21 @@ mishearing actually changed which command ran.
 | `enabled` | `true` | Turn off to use only the tray icon and text input. |
 | `phrases` | three spellings of “black” | Anything in this list activates it. The extra spellings catch how the recogniser writes the word. |
 | `hotkey` | `Ctrl+Alt+Space` | **Display only.** Black Voice does not grab keys — bind this in your desktop's keyboard settings. |
-| `chime` | `true` | Short beep when it starts listening. |
+| `chime` | `true` | Short beep when it starts listening. Only plays for the wake word itself, not for a follow-up listen — see below. |
+| `followup_enabled` | `true` | After answering, keep listening for a quick follow-up without needing to say the wake word again — "open firefox" then "close it too", or a bare "yes" to a confirmation, the same "conversation mode" Alexa and Google Assistant both default to. Turn off to require the wake word before every single command. |
+| `followup_seconds` | `6.0` | How long a follow-up listen waits before giving up and going back to waiting for the wake word. Shorter than a normal command's timeout on purpose: the wake word signals "I am about to speak", a follow-up is only maybe coming. |
 
 The wake word always uses the English Vosk model — there is nothing to
 configure here.
+
+### Repeated commands in one utterance
+
+Getting no immediate response, people often repeat the whole phrase - "Black,
+open firefox... Black, open firefox" - without pausing long enough to end the
+recording, and the recogniser then hears both attempts as one utterance. Black
+Voice keeps only what was said after the *last* wake word in that recording,
+the same way a person listening would mentally discard an abandoned first try,
+rather than trying to make sense of the whole run-on sentence.
 
 ### False triggers
 

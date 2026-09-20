@@ -390,3 +390,25 @@ def test_listen_once_survives_periodic_ambient_blips() -> None:
 
     result = stt.listen_once(mic)
     assert result.text == "open firefox"
+
+
+def test_listen_once_honours_a_shorter_max_seconds_override() -> None:
+    """Used for the post-reply follow-up listen (WakeConfig.followup_seconds),
+    which must give up sooner than a full command timeout when nobody says
+    anything more - not wait AudioConfig.max_command_seconds on every reply
+    on the chance a follow-up might be coming.
+    """
+    stt = _hybrid(_FakeWhisper("keep going"), [], mode="offline")
+    stt.audio.calibrate_noise = False
+    stt.audio.silence_threshold = 0.02
+    stt.audio.max_command_seconds = 100.0  # must not be what actually applies here
+
+    # Continuous loud speech, well above threshold, never quiet enough on its
+    # own to trigger the silence timeout - only max_seconds below should be
+    # what ends this, not max_command_seconds and not running out of audio.
+    mic = _FakeMicrophone([_pcm_block(0.5, 0.5)] * 6)
+
+    result = stt.listen_once(mic, max_seconds=1.0)
+
+    assert result.text == "keep going"
+    assert mic._blocks, "must stop at max_seconds, not consume every available block"

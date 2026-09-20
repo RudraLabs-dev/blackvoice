@@ -124,7 +124,11 @@ it geolocates by IP; set `skills.weather_city` to pin it.
 Seconds, minutes and hours are understood, up to 24 hours. When a timer fires it
 speaks and raises a desktop notification.
 
-Timers do not survive a restart — they live in memory only.
+Timers survive a restart — a crash, an upgrade, a reboot. Each one is saved to
+`~/.local/share/blackvoice/timers.json` the moment it is set and removed once
+it fires; on the next startup anything still pending is rescheduled for
+whatever time is left, and anything that was due while nothing was running is
+spoken once, immediately, rather than dropped.
 
 ## Notes
 

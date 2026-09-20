@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from blackvoice.app import Engine, PendingConfirmation, State
+from blackvoice.audio.stt import Transcript
 from blackvoice.config import Config
 from blackvoice.core.bus import EventBus, Topic
 from blackvoice.nlu.intents import Intent
@@ -193,3 +194,105 @@ def test_wake_word_uses_the_english_model(monkeypatch) -> None:
         assert eng.wake.model_path == eng.config.model_path()
     finally:
         eng.stop()
+
+
+# --------------------------------------------------------------------------- #
+# conversation mode: a follow-up after a reply, without repeating the wake word
+# --------------------------------------------------------------------------- #
+class _FakeMic:
+    """Just enough of Microphone for _converse: something to .drain()."""
+
+    def drain(self) -> None:
+        pass
+
+
+def _scripted_listen(*texts):
+    """A listen_once stand-in that returns each text once, in order, then
+    "nothing heard" forever - the same shape a real follow-up window that
+    eventually goes quiet produces. Every call's max_seconds is recorded so
+    a test can check the wake-triggered listen and a follow-up listen were
+    actually given different timeouts.
+    """
+    calls: list = []
+    remaining = list(texts)
+
+    def _listen_once(mic, on_partial=None, on_level=None, max_seconds=None):
+        calls.append(max_seconds)
+        text = remaining.pop(0) if remaining else ""
+        return Transcript(text, 0.9) if text else Transcript("", 0.0)
+
+    return _listen_once, calls
+
+
+def test_converse_listens_for_one_followup_after_a_reply(engine: Engine, monkeypatch) -> None:
+    # _running is normally set by Engine.start(); _converse is called
+    # directly here without it, so it has to be set by hand - the same
+    # "did shutdown happen mid-conversation" guard the follow-up loop checks
+    # in real use, just simulating "yes, still running" rather than "no".
+    engine._running.set()
+    listen_once, calls = _scripted_listen("what time is it")
+    monkeypatch.setattr(engine.stt, "listen_once", listen_once)
+
+    engine._converse(_FakeMic())
+
+    assert len(calls) == 2, "must listen once more for an optional follow-up"
+    assert calls[0] is None, "the wake-triggered listen keeps the normal command timeout"
+    assert calls[1] == engine.config.wake.followup_seconds, (
+        "the follow-up listen must use the shorter follow-up window, not the "
+        "full command timeout, on every single reply"
+    )
+
+
+def test_converse_keeps_going_through_several_followups(engine: Engine, monkeypatch) -> None:
+    engine._running.set()
+    listen_once, calls = _scripted_listen(
+        "what time is it", "what is the date", "calculate 2 + 2"
+    )
+    monkeypatch.setattr(engine.stt, "listen_once", listen_once)
+
+    engine._converse(_FakeMic())
+
+    assert len(calls) == 4, "3 real follow-ups plus the one that finally hears nothing"
+
+
+def test_converse_does_not_listen_for_a_followup_when_nothing_was_heard(
+    engine: Engine, monkeypatch
+) -> None:
+    listen_once, calls = _scripted_listen()  # never says anything at all
+    monkeypatch.setattr(engine.stt, "listen_once", listen_once)
+
+    engine._converse(_FakeMic())
+
+    assert len(calls) == 1
+
+
+def test_converse_respects_followup_enabled_false(monkeypatch) -> None:
+    eng = _engine_with(monkeypatch, **{"wake.followup_enabled": False})
+    eng._running.set()
+    try:
+        listen_once, calls = _scripted_listen("what time is it")
+        monkeypatch.setattr(eng.stt, "listen_once", listen_once)
+
+        eng._converse(_FakeMic())
+
+        assert len(calls) == 1, "must not listen for a follow-up when it is turned off"
+    finally:
+        eng.stop()
+
+
+def test_converse_stops_the_followup_loop_on_go_to_sleep(engine: Engine, monkeypatch) -> None:
+    # _running set so the earlier "still running?" check cannot be what
+    # stops this - proving ASLEEP itself is what ends the loop.
+    engine._running.set()
+    # If the sleep state is not what ends this, the script would keep going
+    # forever - proving the loop actually checked it, not just run out of
+    # scripted text to say.
+    listen_once, calls = _scripted_listen(
+        "go to sleep", "what time is it", "what time is it", "what time is it"
+    )
+    monkeypatch.setattr(engine.stt, "listen_once", listen_once)
+
+    engine._converse(_FakeMic())
+
+    assert len(calls) == 1
+    assert engine.state == State.ASLEEP

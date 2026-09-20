@@ -543,11 +543,19 @@ class HybridSTT:
         mic: Microphone,
         on_partial=None,
         on_level=None,
+        max_seconds: Optional[float] = None,
     ) -> Transcript:
         """Record until the speaker goes quiet, then transcribe the whole thing.
 
         Endpointing is done on the RMS level rather than on Vosk's own utterance
         boundaries, so it behaves the same way when only the online path exists.
+
+        ``max_seconds`` overrides ``AudioConfig.max_command_seconds`` for this
+        call only - used for the optional post-reply follow-up listen
+        (WakeConfig.followup_seconds), which should give up quickly and
+        quietly when nobody says anything more, rather than holding the mic
+        open for a full command-length timeout after every single reply on
+        the chance a follow-up might be coming.
         """
         self.load()
         for rec in self.recognizers:
@@ -557,8 +565,9 @@ class HybridSTT:
         elapsed = 0.0
         last_partial = ""
         endpointer = Endpointer(self.audio)
+        limit = self.audio.max_command_seconds if max_seconds is None else max_seconds
 
-        while elapsed < self.audio.max_command_seconds:
+        while elapsed < limit:
             block = mic.read(timeout=1.0)
             if block is None:
                 if endpointer.heard_speech:

@@ -412,23 +412,57 @@ class Engine:
             self._set_state(State.IDLE)
 
     def _converse(self, mic: Microphone) -> None:
-        """One activation: listen, understand, act, answer."""
+        """One activation: listen, understand, act, answer - then, unless
+        WakeConfig.followup_enabled is off, keep listening for a quick
+        follow-up without the wake word needing to be said again.
+
+        This is what lets a bare "yes" answer a confirmation, or "close it
+        too" follow up on "open firefox", the way Alexa's and Google
+        Assistant's own "conversation mode" both work - rather than "Black"
+        being required before every single thing said, which is the
+        opposite of what a voice assistant a person actually talks with is
+        supposed to feel like.
+        """
         self.speaker.stop()
         mic.drain()
         self._set_state(State.LISTENING)
         if self.config.wake.chime:
             self._chime()
 
+        acted = self._listen_and_act(mic, max_seconds=None)
+
+        while (
+            acted
+            and self.config.wake.followup_enabled
+            and self._state != State.ASLEEP
+            and self._running.is_set()
+        ):
+            self._set_state(State.LISTENING)
+            # No chime here: a repeated beep after every reply would make a
+            # normal conversation sound like it is being interrupted by the
+            # assistant itself, on the chance a follow-up might be coming.
+            acted = self._listen_and_act(mic, max_seconds=self.config.wake.followup_seconds)
+
+        mic.drain()
+        self.wake.reset()
+        if self._state != State.ASLEEP:
+            self._set_state(State.IDLE)
+
+    def _listen_and_act(self, mic: Microphone, max_seconds: Optional[float]) -> bool:
+        """Listen for one utterance and run it. Returns whether anything was
+        actually heard and acted on - what :meth:`_converse` uses to decide
+        whether listening for a follow-up is worth doing at all.
+        """
         transcript = self.stt.listen_once(
             mic,
             on_partial=lambda text: self.bus.publish(Topic.HEARD, text=text, partial=True),
             on_level=lambda level: self.bus.publish(Topic.LEVEL, level=level),
+            max_seconds=max_seconds,
         )
 
         if not transcript:
             log.debug("nothing heard")
-            self._set_state(State.IDLE)
-            return
+            return False
 
         text = strip_wake_word(transcript.text, self.config.wake.phrases)
         log.info("heard %r (%.2f, %s)", text, transcript.confidence, transcript.source)
@@ -441,18 +475,32 @@ class Engine:
         )
 
         if not text:
-            self._set_state(State.IDLE)
-            return
+            return False
 
         reply = self.process(text)
         self._deliver(reply)
 
-        # The microphone heard our own voice; throw that away.
+        # The microphone heard our own voice; throw that away before
+        # listening again, whether for a follow-up or the next wake word.
         self.speaker.wait_until_idle(timeout=20.0)
         mic.drain()
-        self.wake.reset()
-        if self._state != State.ASLEEP:
-            self._set_state(State.IDLE)
+
+        # _deliver() above unconditionally moves to SPEAKING while the reply
+        # is read aloud, clobbering the ASLEEP state process() had just set
+        # for "go to sleep" - found chasing why the follow-up loop kept
+        # going after that phrase in a real conversation, but true independent
+        # of it: state ends up "speaking", never restored, and _converse's
+        # own "if not asleep, go idle" check below always saw exactly that,
+        # so it always reset to IDLE - meaning "go to sleep" never actually
+        # suppressed the wake word in real voice use, confirmed by the
+        # direct-process() unit test never exercising _deliver() at all and
+        # so never seeing it. Restored here from the reply's own data
+        # instead of trusting self._state, since that is exactly what
+        # _deliver() had already overwritten.
+        if reply.data.get("sleep"):
+            self._set_state(State.ASLEEP)
+
+        return True
 
     def _chime(self) -> None:
         """A short beep so the user knows we are listening."""
