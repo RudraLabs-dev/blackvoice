@@ -4,11 +4,29 @@ Documentation=https://github.com/RudraLabs-dev/blackvoice
 # The tray icon needs a running graphical session.
 After=graphical-session.target sound.target
 PartOf=graphical-session.target
+# Guards Restart=always below: if the process is somehow exiting
+# immediately every time (a corrupt config, a missing dependency), give up
+# after this many restarts in this window instead of spinning forever, and
+# leave a clean "Failed with result 'start-limit-hit'" for `systemctl
+# --user status` to show rather than an endless respawn loop.
+StartLimitIntervalSec=120
+StartLimitBurst=6
 
 [Service]
 Type=simple
 ExecStart=@BIN@ run
-Restart=on-failure
+# Not on-failure: confirmed live, this process can exit cleanly (code=0,
+# "Consumed ... CPU time", no crash trace) from causes that have nothing to
+# do with a bug in it - a "Quit" click, or a screen lock/unlock cycle on a
+# corporate-managed machine tearing down and rebuilding the session's D-Bus
+# services mid-cycle. on-failure only restarts a non-zero exit or a signal,
+# so neither case ever brought the assistant back on its own; whoever
+# noticed had to run `systemctl --user start blackvoice` by hand. always
+# restarts regardless of how the process ended, which is what "the
+# assistant should just be running" actually means for something meant to
+# sit in the tray all day - StartLimitBurst above is what still stops a
+# process that is failing at startup itself from restarting forever.
+Restart=always
 RestartSec=5
 # Give PulseAudio/PipeWire a moment after login before grabbing the mic.
 ExecStartPre=/bin/sleep 3
