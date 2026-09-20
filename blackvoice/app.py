@@ -486,15 +486,24 @@ class Engine:
         """Route ``text`` to a skill and return its reply."""
         with self._lock:
             pending = self._pending
-            if pending and pending.expired:
-                log.debug("pending confirmation expired")
-                self._pending = pending = None
-
-            if pending is not None:
+            # Consumed here unconditionally, not only once answered: a
+            # pending confirmation gets exactly one chance to be answered -
+            # the very next thing said - rather than staying live for up to
+            # PendingConfirmation.TTL seconds. Left as it was before this
+            # fix, an unrelated "yes" said for any other reason within that
+            # window - to a colleague, on a call, agreeing with something
+            # on screen - would silently run whatever had been proposed and
+            # forgotten, with nothing at that moment to connect the two.
+            # Confirmed live: exactly this shape of gap exists in
+            # blackvoice.skills.ai's run_command confirmation flow, though
+            # not observed to have actually fired on a real machine.
+            self._pending = None
+            if pending is not None and not pending.expired:
                 answered = self._answer_confirmation(text, pending)
                 if answered is not None:
-                    self._pending = None
                     return answered
+            elif pending is not None:
+                log.debug("pending confirmation expired")
 
         self._set_state(State.THINKING)
         intent = self.router.route(text)

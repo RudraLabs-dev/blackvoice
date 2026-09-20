@@ -41,14 +41,22 @@ _ANSWERS = {"yes", "yeah", "no", "stop"}
 
 
 def _arm(engine: Engine) -> Confirming:
-    """Register the demo skill and send every non-answer command to it."""
+    """Register the demo skill and send "do the thing" to it.
+
+    Every other non-answer command routes to control.help instead - a real,
+    already-registered command that never asks for confirmation - so a test
+    can send an unrelated intervening command without it re-arming a fresh
+    confirmation of its own and masking whether the *original* one survived.
+    """
     skill = Confirming(SkillContext(config=engine.config, bus=engine.bus))
     engine.skills.register(skill)
 
     def _route(text: str) -> Intent:
         if text.lower() in _ANSWERS:
             return _control_intent(text)
-        return Intent("demo", "demo", "do", text=text)
+        if text == "do the thing":
+            return Intent("demo", "demo", "do", text=text)
+        return Intent("help", "control", "help", text=text)
 
     engine.router.route = _route
     return skill
@@ -113,6 +121,16 @@ def test_a_second_command_cancels_the_pending_confirmation(engine: Engine) -> No
     # Anything that is not yes/no is treated as a fresh command.
     engine.process("do something else")
     assert not skill.ran
+
+    # And the question is gone for good, not just skipped once: a "yes"
+    # said afterwards, for whatever unrelated reason, must not reach back
+    # and run a request the user has moved on from. Before this was fixed,
+    # a pending confirmation stayed live for PendingConfirmation.TTL
+    # seconds regardless of what was said in between - a stray "yes" to a
+    # colleague, on a call, or agreeing with something on screen would have
+    # silently run it, with nothing at that moment to connect the two.
+    engine.process("yes")
+    assert not skill.ran, "a confirmation must not survive an intervening command"
 
 
 def test_reply_is_published(engine: Engine) -> None:
