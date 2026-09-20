@@ -193,6 +193,17 @@ def test_spawn_pins_the_working_directory_to_home(monkeypatch, tmp_path) -> None
 # snap.firefox.firefox"), a check confirmed to pass once the same launch is
 # wrapped in `systemd-run --user --scope` - the same shape of cgroup a normal
 # login session's own session-N.scope already gives an app started by hand.
+#
+# That alone still was not enough: a bare `--user --scope` does not forward
+# the caller's environment either, and a real launch (unlike `--version`,
+# which needs no display at all) then failed a second, different way -
+# "Error: no DISPLAY environment variable specified" - even though
+# blackvoice.service's own process already has DISPLAY, WAYLAND_DISPLAY,
+# XAUTHORITY and DBUS_SESSION_BUS_ADDRESS, being tied to
+# graphical-session.target. `--setenv=NAME` with no value pulls that name
+# from systemd-run's own environment - confirmed on a real machine: with it,
+# Firefox's full process tree (parent, content processes, the lot) actually
+# came up.
 # --------------------------------------------------------------------------- #
 @pytest.fixture(autouse=True)
 def _clear_scope_wrapper_cache():
@@ -221,7 +232,10 @@ def test_spawn_wraps_the_launch_in_its_own_scope_when_systemd_run_exists(
 
     assert Skill.spawn(["firefox"]) is True
     assert calls[0] == [
-        "/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--", "firefox",
+        "/usr/bin/systemd-run", "--user", "--scope", "--quiet",
+        "--setenv=DISPLAY", "--setenv=WAYLAND_DISPLAY",
+        "--setenv=XAUTHORITY", "--setenv=DBUS_SESSION_BUS_ADDRESS",
+        "--", "firefox",
     ]
 
 

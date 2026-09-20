@@ -18,6 +18,20 @@ from ..nlu.intents import Intent
 log = logging.getLogger(__name__)
 
 
+#: The display/session vars a GUI app needs, that ``systemd-run`` does not
+#: forward to the new scope on its own - confirmed live: even though
+#: blackvoice.service's own process already has every one of these (it runs
+#: under graphical-session.target), a scope started with bare ``--user
+#: --scope`` gave the spawned app none of them, and Firefox exited with
+#: "Error: no DISPLAY environment variable specified" before ever opening a
+#: window. ``--setenv=NAME`` with no ``=value`` tells systemd-run to read the
+#: value from its own environment - i.e. blackvoice's, since nothing here
+#: overrides ``Popen``'s ``env`` - and hand that through instead.
+_SCOPE_ENV_PASSTHROUGH = (
+    "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS",
+)
+
+
 @functools.lru_cache(maxsize=1)
 def _scope_wrapper() -> List[str]:
     """Prefix that gives a spawned GUI app its own transient scope unit.
@@ -29,7 +43,11 @@ def _scope_wrapper() -> List[str]:
     binary = shutil.which("systemd-run")
     if not binary:
         return []
-    return [binary, "--user", "--scope", "--quiet", "--"]
+    return (
+        [binary, "--user", "--scope", "--quiet"]
+        + [f"--setenv={name}" for name in _SCOPE_ENV_PASSTHROUGH]
+        + ["--"]
+    )
 
 
 @dataclass
