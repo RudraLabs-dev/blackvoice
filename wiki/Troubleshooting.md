@@ -275,6 +275,20 @@ auto-detection picks the wrong one:
 "skills": { "browser": "firefox" }
 ```
 
+**`blackvoice -v text` says "Opening firefox" but nothing appears** —
+and only when the wake word triggers it, not from this debug command:
+check `journalctl --user -u blackvoice.service` for `is not a snap cgroup`
+or `capability cap_dac_override not found`. That combination means a
+snap-packaged app (Firefox on Ubuntu, by default) is being refused by
+snapd's own confinement, because the systemd service's `NoNewPrivileges`
+hardening blocks the privilege snap-confine needs to start - the debug
+command above never reproduces it, since it runs outside that service's
+own cgroup. Fixed in 0.7.2 by launching apps through their own transient
+`systemd-run --user` unit instead of as a direct child of the service; if
+you still see it on a current install, `systemctl --user status
+blackvoice.service` and confirm `NoNewPrivileges` and `ProtectSystem` in
+`packaging/blackvoice.service` still match what actually shipped.
+
 ### “That command is on the blocked list”
 
 Working as intended — see **[Security Model](Security-Model)**. If you are sure,

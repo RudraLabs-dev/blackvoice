@@ -165,7 +165,19 @@ Every action probes a list of candidates and uses the first one present:
 | Screenshot | `gnome-screenshot` → `spectacle` → `grim` → `scrot` → `import` → `maim` |
 | Lock | `loginctl` → `xdg-screensaver` → `gnome-screensaver` → `swaylock` → `i3lock` → `dm-tool` |
 | Speech | `piper` → `espeak-ng` → `spd-say` → `pyttsx3` |
-| Browser | `xdg-open` → `gio` → `firefox` → `chromium` |
+| Browser | `firefox` → `chromium` → `google-chrome` → `brave-browser` → `vivaldi` → `epiphany` |
+
+A launched app runs through its own transient `systemd-run --user` unit,
+not as a direct child of the service (`Skill.spawn`, `blackvoice/skills/base.py`).
+The install this project ships runs as a systemd user *service*
+(`packaging/blackvoice.service`, `NoNewPrivileges=true` among its hardening),
+and a snap-packaged app - Firefox on Ubuntu, by default - refuses to start
+as a direct descendant of one: snapd's own confinement needs a cgroup shaped
+like a session or scope, and `NoNewPrivileges` blocks the privilege
+snap-confine needs even inside one. Routing the fork through the systemd
+user manager instead, and forwarding `DISPLAY`/`WAYLAND_DISPLAY`/`XAUTHORITY`/
+`DBUS_SESSION_BUS_ADDRESS` explicitly (`systemd-run` does not inherit either
+by default), is what actually gets it on screen.
 
 This is why it works on GNOME, KDE, Xfce and tiling window managers without
 configuration.
