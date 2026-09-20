@@ -12,10 +12,10 @@ the corpus rather than averaged per sample, so a long sentence weighs more than 
 two-word one, as it should.
 
 **Intent accuracy** is the number to optimise. This assistant does not need a
-perfect transcript, it needs the right skill to run: if *"volume chalis karo"*
-comes back as *"volume 40 caro"* the router still reaches ``set_volume`` and the
-user cannot tell anything went wrong. A backend with the worse WER can easily be
-the better one to ship, and only this column will say so.
+perfect transcript, it needs the right skill to run: if *"set the volume to 40
+please"* comes back as *"set the volume to 40 police"* the router still reaches
+``set_volume`` and the user cannot tell anything went wrong. A backend with the
+worse WER can easily be the better one to ship, and only this column will say so.
 
 The expected intent is derived by routing the *reference* text, which is ground
 truth, so a recording does not have to be labelled by hand. That also frames the
