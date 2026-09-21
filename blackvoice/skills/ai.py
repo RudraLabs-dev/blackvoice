@@ -139,6 +139,103 @@ class AISkill(Skill):
         self._history.append({"role": "user", "content": question})
         self._history.append({"role": "assistant", "content": answer})
 
+    # ----------------------------------------------------------- quick_answer
+    def quick_answer(self, prompt: str, system: str, timeout: float = 12.0) -> Optional[str]:
+        """A single, stateless question for another skill to ask - not part
+        of the spoken conversation, no history read or written, no tool
+        calls, nothing spoken automatically. For a skill that just found its
+        target is missing something ("code" is not on PATH) and wants a
+        second opinion on what to tell the user, rather than only ever
+        saying "not found" - whatever this returns is the caller's to use or
+        discard, never surfaced on its own.
+
+        Runs on whichever backend ai.provider is already configured for -
+        local Ollama by default, but exactly as "online" as the assistant's
+        own answers already are if that has been set to anthropic or openai.
+        No new setting to reach for a better answer than the default local
+        model gives; this reuses whichever answer quality was already chosen.
+
+        Returns ``None`` - never raises - if no backend is configured, the
+        call fails, or the model does not have a real answer: a lookup
+        nobody explicitly asked a question of should never surface a raw
+        error, only quietly get nothing back.
+        """
+        provider = (self.ai.provider or "none").lower()
+        if provider == "none":
+            return None
+        try:
+            if provider == "ollama":
+                return self._quick_ollama(prompt, system, timeout)
+            if provider == "anthropic":
+                return self._quick_anthropic(prompt, system)
+            if provider == "openai":
+                return self._quick_openai(prompt, system, timeout)
+        except Exception:
+            log.debug("quick_answer failed", exc_info=True)
+        return None
+
+    def _quick_ollama(self, prompt: str, system: str, timeout: float) -> Optional[str]:
+        import requests
+
+        response = requests.post(
+            f"{self.ai.ollama_url.rstrip('/')}/api/chat",
+            json={
+                "model": self.ai.ollama_model,
+                "stream": False,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                "options": {"num_predict": 200},
+            },
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        text = ((response.json().get("message") or {}).get("content") or "").strip()
+        return text or None
+
+    def _quick_anthropic(self, prompt: str, system: str) -> Optional[str]:
+        client = self._anthropic_client()
+        response = client.messages.create(
+            model=self.ai.anthropic_model,
+            max_tokens=200,
+            system=system,
+            output_config={"effort": "low"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+        if response.stop_reason == "refusal":
+            return None
+        text = "".join(
+            block.text for block in response.content if block.type == "text"
+        ).strip()
+        return text or None
+
+    def _quick_openai(self, prompt: str, system: str, timeout: float) -> Optional[str]:
+        import requests
+
+        key = self.ai.api_key or os.environ.get("OPENAI_API_KEY")
+        if not key:
+            return None
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={
+                "model": self.ai.openai_model,
+                "max_tokens": 200,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+            },
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        choices = response.json().get("choices") or []
+        if not choices:
+            return None
+        text = ((choices[0].get("message") or {}).get("content") or "").strip()
+        return text or None
+
     # -------------------------------------------------------------- routing
     def _ask(self, provider: str, question: str) -> str:
         if provider == "anthropic":

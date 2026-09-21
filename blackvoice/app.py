@@ -93,6 +93,10 @@ class Engine:
         self.skills = SkillRegistry()
         ctx = SkillContext(config=self.config, bus=self.bus, say=self.say)
         self.ai_skill = AISkill(ctx)
+        # Set on the same ctx object every other skill below is constructed
+        # with, so any of them can reach AISkill.quick_answer without each
+        # needing its own reference wired through by hand.
+        ctx.ai = self.ai_skill
         self.utils_skill = UtilsSkill(ctx)
         for skill in (
             ControlSkill(ctx),

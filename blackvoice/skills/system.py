@@ -95,6 +95,9 @@ class SystemSkill(Skill):
             # Maybe it is a desktop entry rather than a bare binary.
             if self.which("gtk-launch") and self._launch_desktop(target):
                 return Reply(f"Opening {pretty}.")
+            install = self.suggest_install(pretty)
+            if install:
+                return Reply.error(f"{pretty} is not installed. To install it: {install}")
             return Reply.error(f"I could not find {pretty} on this system.")
 
         if self.spawn([binary]):
@@ -311,7 +314,12 @@ class SystemSkill(Skill):
         for argv, _ in attempts:
             if not self.which(argv[0]):
                 continue
-            result = self.run(argv, timeout=15)
+            # run_gui, not run: confirmed live that a screenshot tool found
+            # on PATH could still silently fail here - same cgroup/session
+            # mismatch as launching Firefox, for a command this skill has to
+            # wait on and check the result of rather than just fire and
+            # forget, so spawn() alone was not an option either.
+            result = self.run_gui(argv, timeout=15)
             if result.returncode == 0 and target.exists():
                 return Reply(
                     "Screenshot saved to your Pictures folder.",
@@ -319,6 +327,9 @@ class SystemSkill(Skill):
                     data={"path": str(target)},
                 )
 
+        install = self.suggest_install("a screenshot tool such as gnome-screenshot")
+        if install:
+            return Reply.error(f"No screenshot tool found. To install one: {install}")
         return Reply.error(
             "No screenshot tool found. Install gnome-screenshot, grim or scrot."
         )

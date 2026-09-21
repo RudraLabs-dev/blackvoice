@@ -14,6 +14,7 @@ from blackvoice.nlu.intents import Intent
 from blackvoice.skills.base import Reply, SkillContext, SkillRegistry, Skill
 from blackvoice.skills.control import ControlSkill
 from blackvoice.skills.files import FilesSkill
+from blackvoice.skills.system import SystemSkill
 from blackvoice.skills.utils import UtilsSkill
 
 
@@ -455,3 +456,132 @@ def test_the_full_conversation_actually_finds_the_file(ctx: SkillContext, monkey
         assert "report.pdf" in second.speech
     finally:
         engine.stop()
+
+
+# --------------------------------------------------------------------------- #
+# suggest_install: a missing app or tool gets a real install command, not
+# just "not found" - via AISkill.quick_answer, never made up here, and never
+# run automatically. See wiki/Security-Model: this project never escalates
+# privileges on its own, so the command is only ever told to the user, the
+# same stance as everything else here that needs root.
+# --------------------------------------------------------------------------- #
+class _FakeAI:
+    """Stands in for ctx.ai (a real AISkill) in tests that only care about
+    the prompt Skill.suggest_install builds and what it does with the reply.
+    """
+
+    def __init__(self, answer):
+        self.answer = answer
+        self.calls = []
+
+    def quick_answer(self, prompt, system, timeout=12.0):
+        self.calls.append((prompt, system))
+        return self.answer
+
+
+def test_suggest_install_is_none_without_an_ai_backend(ctx: SkillContext) -> None:
+    ctx.ai = None
+    skill = SystemSkill(ctx)
+    assert skill.suggest_install("code") is None
+
+
+def test_suggest_install_asks_and_strips_backticks(ctx: SkillContext) -> None:
+    fake_ai = _FakeAI("`sudo snap install code --classic`")
+    ctx.ai = fake_ai
+    skill = SystemSkill(ctx)
+
+    result = skill.suggest_install("code")
+
+    assert result == "sudo snap install code --classic"
+    prompt, system = fake_ai.calls[0]
+    assert prompt == "code"
+    assert "install" in system.lower()
+
+
+def test_suggest_install_filters_out_unknown(ctx: SkillContext) -> None:
+    ctx.ai = _FakeAI("UNKNOWN")
+    skill = SystemSkill(ctx)
+    assert skill.suggest_install("some obscure thing") is None
+
+
+def test_suggest_install_is_none_when_quick_answer_gives_nothing(ctx: SkillContext) -> None:
+    ctx.ai = _FakeAI(None)
+    skill = SystemSkill(ctx)
+    assert skill.suggest_install("code") is None
+
+
+def test_open_app_not_found_offers_the_install_command(ctx: SkillContext, monkeypatch) -> None:
+    ctx.ai = _FakeAI("sudo snap install code --classic")
+    skill = SystemSkill(ctx)
+    # _resolve_app calls shutil.which directly, not Skill.which - nothing on
+    # PATH either way.
+    monkeypatch.setattr("blackvoice.skills.system.shutil.which", lambda *a: None)
+
+    reply = skill.handle(Intent("open_app", "system", "open_app", {"target": "code"}))
+
+    assert not reply.ok
+    assert "not installed" in reply.speech
+    assert "sudo snap install code --classic" in reply.speech
+
+
+def test_open_app_not_found_without_ai_uses_the_plain_message(ctx: SkillContext) -> None:
+    ctx.ai = None
+    skill = SystemSkill(ctx)
+
+    reply = skill.handle(
+        Intent("open_app", "system", "open_app", {"target": "definitely-not-a-real-app"})
+    )
+
+    assert not reply.ok
+    assert "I could not find" in reply.speech
+
+
+def test_run_gui_wraps_the_launch_wrapper(monkeypatch) -> None:
+    """The same wrapper spawn() uses - see
+    test_spawn_wraps_the_launch_in_its_own_unit_when_systemd_run_exists for
+    why: a direct child of blackvoice.service could not talk to a snap's
+    confinement, and the same cgroup mismatch applies to anything else that
+    needs the display or the compositor, not only to launching an app - a
+    screenshot tool above all, confirmed live to fail silently exactly the
+    same way without this.
+    """
+    import subprocess as subprocess_module
+
+    monkeypatch.setattr(
+        "blackvoice.skills.base.shutil.which",
+        lambda name: "/usr/bin/systemd-run" if name == "systemd-run" else None,
+    )
+    calls = []
+
+    def _run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess_module.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr("blackvoice.skills.base.subprocess.run", _run)
+
+    result = Skill.run_gui(["gnome-screenshot", "-f", "/tmp/x.png"])
+
+    assert result.returncode == 0
+    assert calls[0] == [
+        "/usr/bin/systemd-run", "--user", "--collect", "--quiet",
+        "--setenv=DISPLAY", "--setenv=WAYLAND_DISPLAY",
+        "--setenv=XAUTHORITY", "--setenv=DBUS_SESSION_BUS_ADDRESS",
+        "--", "gnome-screenshot", "-f", "/tmp/x.png",
+    ]
+
+
+def test_run_gui_falls_back_to_a_bare_run_without_systemd_run(monkeypatch) -> None:
+    import subprocess as subprocess_module
+
+    monkeypatch.setattr("blackvoice.skills.base.shutil.which", lambda name: None)
+    calls = []
+
+    def _run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess_module.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr("blackvoice.skills.base.subprocess.run", _run)
+
+    Skill.run_gui(["gnome-screenshot", "-f", "/tmp/x.png"])
+
+    assert calls[0] == ["gnome-screenshot", "-f", "/tmp/x.png"]

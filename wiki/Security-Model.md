@@ -48,6 +48,14 @@ are rejected before the pattern list is even consulted.
 > Black Voice never escalates privileges. If something needs root, it tells you
 > to run it yourself.
 
+That holds for a command it suggests, not only one you ask it to run: "open
+code" when VS Code is not installed, or "take a screenshot" with no
+screenshot tool present, asks `AISkill.quick_answer` (whichever backend
+`ai.provider` is already set to) what the real install command would be and
+speaks it - `sudo snap install code --classic`, say - but never runs it.
+That answer is only ever spoken, never handed to `ShellGuard` or executed;
+deciding whether to actually run it is left to you, same as `sudo` itself.
+
 ### Asks first
 
 - Anything not on the read-only list — `apt`, `pip`, `touch`, `systemctl`, …

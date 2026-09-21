@@ -71,7 +71,7 @@ Set `speech.mode` to `"offline"` and nothing ever leaves the machine, either way
 ## Project status
 
 Version 0.8.0. The command routing, safety guard, configuration and skill layers
-are covered by 442 tests. The audio path — microphone capture, recognition,
+are covered by 460 tests. The audio path — microphone capture, recognition,
 wake word and speech output — needs a real Linux machine with a microphone to
 exercise, so treat it as the least-tested part of the system and report what
 breaks. `blackvoice eval` exists for exactly that: recording your own voice

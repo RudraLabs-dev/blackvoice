@@ -9,11 +9,16 @@ import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from ..config import Config
 from ..core.bus import EventBus
 from ..nlu.intents import Intent
+
+if TYPE_CHECKING:
+    # Only for the type hint below - importing AISkill for real would be
+    # circular, since ai.py itself imports Reply/Skill/SkillContext from here.
+    from .ai import AISkill
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +118,12 @@ class SkillContext:
     bus: EventBus
     #: set by the engine; lets a skill speak mid-task
     say: Callable[[str], None] = lambda _text: None
+    #: set by the engine once AISkill exists, so any skill can ask it a
+    #: single stateless question (AISkill.quick_answer) - a skill that just
+    #: found its target is not installed, for one, asking how to install it
+    #: rather than only ever saying "not found". None until the engine sets
+    #: it, and still None in a test that builds a SkillContext by hand.
+    ai: Optional["AISkill"] = None
 
 
 class Skill(ABC):
@@ -158,6 +169,22 @@ class Skill(ABC):
             return subprocess.CompletedProcess(argv, exc.returncode, exc.stdout or "", exc.stderr or "")
 
     @staticmethod
+    def run_gui(argv, timeout: float = 15.0) -> subprocess.CompletedProcess:
+        """Like :meth:`run`, but through the same detached transient-unit
+        wrapper :meth:`spawn` uses for launching an app - for a GUI-facing
+        command (a screenshot tool, above all) whose exit code or resulting
+        file this skill needs to wait for and check, unlike an app that is
+        only ever launched and left running.
+
+        A direct child of blackvoice.service is still a direct child of it
+        regardless of whether anything here waits around for the result -
+        the cgroup/session mismatch found breaking Firefox is not specific
+        to a snap's own confinement check; anything that needs to talk to
+        the display server or the compositor sits in the same position.
+        """
+        return Skill.run([*_detached_launch_wrapper(), *argv], timeout=timeout)
+
+    @staticmethod
     def spawn(argv) -> bool:
         """Launch a GUI program and detach from it.
 
@@ -193,6 +220,37 @@ class Skill(ABC):
         except (OSError, ValueError):
             log.debug("could not spawn %s", argv, exc_info=True)
             return False
+
+    def suggest_install(self, name: str) -> Optional[str]:
+        """Ask AISkill how ``name`` would actually get installed here, for a
+        command whose target genuinely is not on this system - not a guess
+        this project bakes in and lets go stale, and not an autonomous
+        install either: this only ever returns a command for a human to
+        decide whether to run, the same "tells you to run it yourself"
+        stance the rest of this project already takes for anything needing
+        root (see Security-Model). Returns ``None`` - never a made-up
+        command - when no AI backend is configured, the call fails, or the
+        model has nothing better than a guess.
+        """
+        if self.ctx.ai is None:
+            return None
+
+        manager = self.which("apt", "dnf", "pacman", "zypper", "snap", "flatpak")
+        manager_name = Path(manager).name if manager else "an unknown"
+        system = (
+            "You help identify Linux install commands. Given the name of an "
+            f"application or command, and that this system's package manager "
+            f"is {manager_name}, reply with ONLY the exact shell command that "
+            "installs it - nothing else, no explanation, no markdown, no "
+            "backticks. If you are not confident of a real, correct command "
+            "for that specific name, reply with exactly: UNKNOWN"
+        )
+        answer = self.ctx.ai.quick_answer(name, system)
+        if not answer:
+            return None
+        if answer.strip().upper() == "UNKNOWN":
+            return None
+        return answer.strip().strip("`")
 
 
 class SkillRegistry:

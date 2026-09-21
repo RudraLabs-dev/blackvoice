@@ -209,7 +209,10 @@ model in the loop at all for that back-and-forth.
 ```python
 self.which("wpctl", "pactl", "amixer")   # first one on PATH, or None
 self.run(["df", "-h"], timeout=10)       # CompletedProcess, never raises
+self.run_gui(["gnome-screenshot", "-f", path])  # like run, but for anything
+                                                 # that talks to the display
 self.spawn(["firefox"])                  # launch and detach, returns bool
+self.suggest_install("code")             # install command, or None
 self.config                              # the Config object
 self.bus                                 # the event bus
 self.ctx.say("...")                      # speak mid-task
@@ -217,6 +220,37 @@ self.ctx.say("...")                      # speak mid-task
 
 `run` returns a `CompletedProcess` even when the binary is missing (exit 127) or
 times out (exit 124), so you never need a try/except around it.
+
+**Use `run_gui` instead of `run` for anything that needs the display or the
+compositor** - a screenshot tool, a colour picker, anything short of a plain
+CLI command. blackvoice itself normally runs as a systemd user service
+(`packaging/blackvoice.service`), and a direct child of that service sits in
+the wrong cgroup for some of these to work at all: confirmed live, a
+screenshot tool found on PATH by `which` still silently failed run this way,
+the identical shape of problem `spawn` already works around for launching an
+app. `run_gui` wraps the same fix around a command you need to wait for and
+check the result of, rather than only ever launch and leave running.
+
+**Reach for `suggest_install` when the thing you needed is not on this
+system at all**, rather than only ever saying "not found":
+
+```python
+def _do_open_app(self, intent: Intent) -> Reply:
+    binary = self.which(candidate)
+    if binary is None:
+        install = self.suggest_install(pretty_name)
+        if install:
+            return Reply.error(f"{pretty_name} is not installed. To install it: {install}")
+        return Reply.error(f"I could not find {pretty_name} on this system.")
+    ...
+```
+
+It asks `AISkill.quick_answer` - whichever backend `ai.provider` is already
+configured for - for the real install command, and returns `None` if no AI
+backend is configured or it does not have a confident answer, so you always
+still have a plain fallback message to fall back to. It never runs anything:
+see [Security Model](Security-Model) for why that command is only ever
+spoken, never executed on its own.
 
 **Always probe with `which` before assuming a tool exists.** That is what makes
 Black Voice work across desktops:

@@ -11,7 +11,7 @@ pip install -e ".[all,dev]"
 pytest -q
 ```
 
-442 tests should pass in under a second. None of them need a microphone, a
+460 tests should pass in under a second. None of them need a microphone, a
 display or a network connection.
 
 ## Working without a microphone
