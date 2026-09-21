@@ -90,6 +90,25 @@ shell, and **always** ask first:
 
 A misheard word here is expensive, so there is no way to turn this off.
 
+## Turning a radio off
+
+Turning Wi-Fi or Bluetooth **off** asks first, the same way and for the same
+reason:
+
+```
+  you    black, turn off wifi
+  black  Turn off Wi-Fi? Say yes to confirm.
+```
+
+Turning either back **on** does not - only losing connectivity is the
+expensive direction. Added after a real incident: with
+[conversation mode](Configuration#wake--the-wake-word) listening for a
+follow-up without the wake word said again, something said after an
+unrelated reply turned real Wi-Fi off for 28 minutes on a machine someone
+else was depending on being reachable - never a deliberate "Black, turn off
+wifi". Confirmation is what makes that specific word, in that specific
+position, no longer enough on its own.
+
 ## Other guard rails
 
 **Arithmetic** parses an abstract syntax tree and walks it, permitting only

@@ -191,7 +191,7 @@ settings — rate, volume, and which `.onnx` file is used.
 ### Is it production ready?
 
 Version 0.8.0. The command routing, safety guard, configuration and skill layers
-have 460 tests. The audio path needs a real machine with a microphone to
+have 465 tests. The audio path needs a real machine with a microphone to
 exercise properly, so treat that as the least-proven part and report what breaks.
 
 ### How do I uninstall it?

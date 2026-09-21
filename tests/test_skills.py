@@ -585,3 +585,95 @@ def test_run_gui_falls_back_to_a_bare_run_without_systemd_run(monkeypatch) -> No
     Skill.run_gui(["gnome-screenshot", "-f", "/tmp/x.png"])
 
     assert calls[0] == ["gnome-screenshot", "-f", "/tmp/x.png"]
+
+
+# --------------------------------------------------------------------------- #
+# turning a radio off asks first - reported live: a follow-up heard during
+# WakeConfig.followup_seconds turned real Wi-Fi off for 28 minutes, from
+# something said after an unrelated reply, never a deliberate "Black, turn
+# off wifi". Same reasoning _power() already applies to shutdown/restart.
+# --------------------------------------------------------------------------- #
+def _fake_run_ok(argv, **kwargs):
+    import subprocess as subprocess_module
+
+    return subprocess_module.CompletedProcess(argv, 0, "", "")
+
+
+def test_wifi_off_asks_before_doing_it(ctx: SkillContext, monkeypatch) -> None:
+    skill = SystemSkill(ctx)
+    monkeypatch.setattr("blackvoice.skills.system.shutil.which", lambda name: name)
+    ran = []
+    monkeypatch.setattr(skill, "run", lambda argv, **kw: ran.append(argv) or _fake_run_ok(argv))
+
+    reply = skill.handle(Intent("wifi", "system", "wifi", {"state": "off"}))
+
+    assert reply.confirm == "Turn off Wi-Fi?"
+    assert callable(reply.on_confirm)
+    assert not ran, "must not actually turn it off before being confirmed"
+
+
+def test_wifi_off_confirmed_actually_turns_it_off(ctx: SkillContext, monkeypatch) -> None:
+    skill = SystemSkill(ctx)
+    monkeypatch.setattr("blackvoice.skills.system.shutil.which", lambda name: name)
+    ran = []
+    monkeypatch.setattr(skill, "run", lambda argv, **kw: ran.append(argv) or _fake_run_ok(argv))
+
+    reply = skill.handle(Intent("wifi", "system", "wifi", {"state": "off"}))
+    committed = reply.on_confirm()
+
+    assert ran and ran[0][:3] == ["nmcli", "radio", "wifi"]
+    assert committed.speech == "Wi-Fi turned off."
+
+
+def test_wifi_on_needs_no_confirmation(ctx: SkillContext, monkeypatch) -> None:
+    skill = SystemSkill(ctx)
+    monkeypatch.setattr("blackvoice.skills.system.shutil.which", lambda name: name)
+    monkeypatch.setattr(skill, "run", _fake_run_ok)
+
+    reply = skill.handle(Intent("wifi", "system", "wifi", {"state": "on"}))
+
+    assert reply.confirm is None
+    assert reply.speech == "Wi-Fi turned on."
+
+
+def test_bluetooth_off_asks_before_doing_it(ctx: SkillContext, monkeypatch) -> None:
+    skill = SystemSkill(ctx)
+    monkeypatch.setattr("blackvoice.skills.system.shutil.which", lambda name: name)
+    ran = []
+    monkeypatch.setattr(skill, "run", lambda argv, **kw: ran.append(argv) or _fake_run_ok(argv))
+
+    reply = skill.handle(Intent("bluetooth", "system", "bluetooth", {"state": "off"}))
+
+    assert reply.confirm == "Turn off Bluetooth?"
+    assert not ran
+
+    committed = reply.on_confirm()
+    assert ran and ran[0][:2] == ["bluetoothctl", "power"]
+    assert committed.speech == "Bluetooth turned off."
+
+
+def test_wifi_off_through_the_engine_needs_a_spoken_yes(ctx: SkillContext, monkeypatch) -> None:
+    """The same round trip the real incident hit: 'turn off wifi' must not
+    take effect on its own, whether it arrived as a deliberate wake-word
+    command or was only picked up during a conversation-mode follow-up.
+    """
+    from blackvoice.app import Engine
+
+    ctx.config.ai.provider = "none"
+    engine = Engine(ctx.config)
+    system_skill = engine.skills.get("system")
+    ran = []
+    monkeypatch.setattr("blackvoice.skills.system.shutil.which", lambda name: name)
+    monkeypatch.setattr(
+        system_skill, "run", lambda argv, **kw: ran.append(argv) or _fake_run_ok(argv)
+    )
+    try:
+        first = engine.process("turn off wifi")
+        assert not ran, "must not turn wifi off before a yes"
+        assert "Say yes to confirm" in first.speech
+
+        second = engine.process("yes")
+        assert ran, "confirming must actually turn it off"
+        assert second.speech == "Wi-Fi turned off."
+    finally:
+        engine.stop()

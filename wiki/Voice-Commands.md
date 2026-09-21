@@ -73,6 +73,10 @@ with it.
 - `battery` · `battery status`
 - `system info` · `cpu usage`
 
+**Turning Wi-Fi or Bluetooth off asks for confirmation first**, the same as a
+power command - turning either back on does not. See
+[Security Model](Security-Model#turning-a-radio-off) for why.
+
 `battery` reports the charge and, on battery power, the estimated time left.
 `system info` shows CPU, memory, disk and uptime.
 

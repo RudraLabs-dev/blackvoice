@@ -393,8 +393,32 @@ class SystemSkill(Skill):
     def _wants_on(state: str) -> bool:
         return (state or "").strip().lower() in {"on", "enable", "start"}
 
+    def _radio_off_confirm(self, label: str, commit) -> Reply:
+        """Turning a radio off always asks first - the same reasoning
+        :meth:`_power` already applies to shutdown/restart/suspend.
+
+        Reported live: a follow-up heard during
+        WakeConfig.followup_seconds - conversation mode's window for
+        answering without saying the wake word again - turned real Wi-Fi
+        off for 28 minutes, from something said after an unrelated reply
+        rather than a deliberate "Black, turn off wifi". A misheard or
+        half-meant word here is exactly as expensive as a misheard "shut
+        down" already was judged to be, arguably more so on a machine
+        someone else is depending on being reachable.
+        """
+        return Reply(
+            speech=f"Turn off {label}? Say yes to confirm.",
+            confirm=f"Turn off {label}?",
+            on_confirm=commit,
+        )
+
     def _do_wifi(self, intent: Intent) -> Reply:
         on = self._wants_on(intent.slots.get("state", "on"))
+        if on:
+            return self._set_wifi(on=True)
+        return self._radio_off_confirm("Wi-Fi", lambda: self._set_wifi(on=False))
+
+    def _set_wifi(self, on: bool) -> Reply:
         if self.which("nmcli"):
             result = self.run(["nmcli", "radio", "wifi", "on" if on else "off"])
             if result.returncode == 0:
@@ -407,6 +431,11 @@ class SystemSkill(Skill):
 
     def _do_bluetooth(self, intent: Intent) -> Reply:
         on = self._wants_on(intent.slots.get("state", "on"))
+        if on:
+            return self._set_bluetooth(on=True)
+        return self._radio_off_confirm("Bluetooth", lambda: self._set_bluetooth(on=False))
+
+    def _set_bluetooth(self, on: bool) -> Reply:
         if self.which("bluetoothctl"):
             result = self.run(["bluetoothctl", "power", "on" if on else "off"])
             if result.returncode == 0:
